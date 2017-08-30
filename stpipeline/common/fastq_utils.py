@@ -184,6 +184,92 @@ def check_umi_template(umi, template):
     p = re.compile(template)
     return p.match(umi) is not None
 
+def filterInputReads_task_generator(fw_file,rv_file,settings):
+    for read_one, read_two in izip(readfq(fw_file), readfq(rv_file)):
+        yield read_one, read_two, settings
+
+def filterInputReads_pool_worker_function(task):
+    
+    (header_fw, sequence_fw, quality_fw), (header_rv, sequence_rv, quality_rv), settings = task
+    
+    read_pair = {
+        'header_fw':header_fw,
+        'sequence_fw':sequence_fw,
+        'quality_fw':quality_fw,
+        'header_rv':header_rv,
+        'sequence_rv':sequence_rv,
+        'quality_rv':quality_rv,
+        'orig_sequence_rv':sequence_rv,
+        'orig_quality_rv':quality_rv,
+        'discard_reson':None
+    }
+    
+    if not read_pair['sequence_fw'] or not read_pair['sequence_rv']:
+        error = "Error doing quality trimming, Checks of raw reads.\n" \
+        "The input files are not of the same length"
+        #"The input files {},{} are not of the same length".format(fw,rv)
+        logger.error(error)
+    
+    if read_pair['header_fw'].split()[0] != read_pair['header_rv'].split()[0]:
+        logger.warning("Pair reads found with different " \
+                       "names {} and {}".format(read_pair['header_fw'],read_pair['header_rv']))
+                
+    # If we want to check for UMI quality and the UMI is incorrect
+    # then we discard the reads
+    if settings['umi_filter'] \
+    and not check_umi_template(read_pair['sequence_fw'][settings['umi_start']:settings['umi_end']], settings['umi_filter_template']):
+        read_pair['discard_reson'] = 'dropped_umi_template'
+    
+    # Check if the UMI has many low quality bases
+    if not read_pair['discard_reson'] and (settings['umi_end'] - settings['umi_start']) >= settings['umi_quality_bases'] and \
+    len([b for b in read_pair['quality_fw'][settings['umi_start']:settings['umi_end']] if (ord(b) - settings['phred']) < settings['min_qual']]) > settings['umi_quality_bases']:
+        read_pair['discard_reson'] = 'dropped_umi'
+
+    # If reverse read has a high AT content discard...
+    if not read_pair['discard_reson'] and settings['do_AT_filter'] and \
+    ((read_pair['sequence_rv'].count("A") + read_pair['sequence_rv'].count("T")) / len(read_pair['sequence_rv'])) * 100 >= settings['filter_AT_content']:
+        read_pair['discard_reson'] = 'dropped_AT'
+
+    # If reverse read has a high GC content discard...
+    if not read_pair['discard_reson'] and settings['do_GC_filter'] and \
+    ((read_pair['sequence_rv'].count("G") + read_pair['sequence_rv'].count("C")) / len(read_pair['sequence_rv'])) * 100 >= settings['filter_GC_content']:
+        read_pair['discard_reson'] = 'dropped_GC'
+
+    if not read_pair['discard_reson']:
+        # if indicated we remove the artifacts PolyA from reverse reads
+        if settings['do_adaptorA'] and len(read_pair['sequence_rv']) > settings['min_length']: 
+            read_pair['sequence_rv'], read_pair['quality_rv'] = removeAdaptor(read_pair['sequence_rv'], read_pair['quality_rv'], 
+                                                    settings['adaptorA'], settings['adaptor_missmatches']) 
+        # if indicated we remove the artifacts PolyT from reverse reads
+        if settings['do_adaptorT'] and len(read_pair['sequence_rv']) > settings['min_length']: 
+            read_pair['sequence_rv'], read_pair['quality_rv'] = removeAdaptor(read_pair['sequence_rv'], read_pair['quality_rv'], 
+                                                    settings['adaptorT'], settings['adaptor_missmatches']) 
+        # if indicated we remove the artifacts PolyG from reverse reads
+        if settings['do_adaptorG'] and len(read_pair['sequence_rv']) > settings['min_length']: 
+            read_pair['sequence_rv'], read_pair['quality_rv'] = removeAdaptor(read_pair['sequence_rv'], read_pair['quality_rv'], 
+                                                    settings['adaptorG'], settings['adaptor_missmatches']) 
+        # if indicated we remove the artifacts PolyC from reverse reads
+        if settings['do_adaptorC'] and len(read_pair['sequence_rv']) > settings['min_length']: 
+            read_pair['sequence_rv'], read_pair['quality_rv'] = removeAdaptor(read_pair['sequence_rv'], read_pair['quality_rv'], 
+                                                    settings['adaptorC'], settings['adaptor_missmatches'])
+            
+        # if indicated we remove the artifacts PolyC from reverse reads
+        if settings['do_adaptorN'] and len(read_pair['sequence_rv']) > settings['min_length']: 
+            read_pair['sequence_rv'], read_pair['quality_rv'] = removeAdaptor(read_pair['sequence_rv'], read_pair['quality_rv'], 
+                                                    settings['adaptorN'], settings['adaptor_missmatches'])
+            
+        # Check if the read is smaller than the minimum after removing artifacts   
+        if len(read_pair['sequence_rv']) < settings['min_length']:
+            read_pair['discard_reson'] = 'dropped_adaptor'
+        else:              
+            # Trim reverse read (will return None if length of trimmed sequence is less than min_length)
+            read_pair['sequence_rv'], read_pair['quality_rv'] = trim_quality(read_pair['sequence_rv'], read_pair['quality_rv'], 
+                                                   settings['min_qual'], settings['min_length'], settings['phred'])
+            if not read_pair['sequence_rv'] or not read_pair['quality_rv']:
+                read_pair['discard_reson'] = 'dropped_adaptor'
+    
+    return read_pair
+
 def filterInputReads(fw, 
                      rv,
                      out_fw,
@@ -254,13 +340,15 @@ def filterInputReads(fw,
         out_rv_writer_discarded = writefq(out_rv_handle_discarded)
     
     # Some counters
-    total_reads = 0
-    dropped_rv = 0
-    dropped_umi = 0
-    dropped_umi_template = 0
-    dropped_AT = 0
-    dropped_GC = 0
-    dropped_adaptor = 0
+    read_pair_counters = {
+        'total_reads':0,
+        'dropped_rv':0,
+        'dropped_umi':0,
+        'dropped_umi_template':0,
+        'dropped_AT': 0,
+        'dropped_GC':0,
+        'dropped_adaptor':0
+    }
     
     # Build fake sequence adaptors with the parameters given
     adaptorA = "".join("A" for k in xrange(polyA_min_distance))
@@ -284,95 +372,66 @@ def filterInputReads(fw,
     # Open fastq files with the fastq parser
     fw_file = safeOpenFile(fw, "rU")
     rv_file = safeOpenFile(rv, "rU")
-    for (header_fw, sequence_fw, quality_fw), (header_rv, sequence_rv, quality_rv) \
-    in izip(readfq(fw_file), readfq(rv_file)):
-        
-        if not sequence_fw or not sequence_rv:
-            error = "Error doing quality trimming, Checks of raw reads.\n" \
-            "The input files {},{} are not of the same length".format(fw,rv)
-            logger.error(error)
-            break
-        
-        if header_fw.split()[0] != header_rv.split()[0]:
-            logger.warning("Pair reads found with different " \
-                           "names {} and {}".format(header_fw,header_rv))
-            
-        # Increase reads counter
-        total_reads += 1
-        discard_read = False
-        
-        # If we want to check for UMI quality and the UMI is incorrect
-        # then we discard the reads
-        if umi_filter \
-        and not check_umi_template(sequence_fw[umi_start:umi_end], umi_filter_template):
-            dropped_umi_template += 1
-            discard_read = True
-        
-        # Check if the UMI has many low quality bases
-        if not discard_read and (umi_end - umi_start) >= umi_quality_bases and \
-        len([b for b in quality_fw[umi_start:umi_end] if (ord(b) - phred) < min_qual]) > umi_quality_bases:
-            dropped_umi += 1
-            discard_read = True
+    
+    settings = {
+        'umi_filter':umi_filter,
+        'umi_start':umi_start,
+        'umi_end':umi_end,
+        'umi_filter_template':umi_filter_template,
+        'umi_quality_bases':umi_quality_bases,
+        'do_AT_filter':do_AT_filter,
+        'filter_AT_content':filter_AT_content,
+        'do_GC_filter':do_GC_filter,
+        'filter_GC_content':filter_GC_content,
+        'do_adaptorA':do_adaptorA,
+        'adaptorA':adaptorA, 
+        'do_adaptorT':do_adaptorT,
+        'adaptorT':adaptorT, 
+        'do_adaptorG':do_adaptorG,
+        'adaptorG':adaptorG, 
+        'do_adaptorC':do_adaptorC,
+        'adaptorC':adaptorC,
+        'do_adaptorN':do_adaptorN,       
+        'adaptorN':adaptorN,
+        'adaptor_missmatches':adaptor_missmatches,
+        'min_length':min_length,
+        'min_qual':min_qual,
+        'phred':phred
+    }
+    
+    import multiprocessing
+    
+    poolOfProcesses = multiprocessing.Pool(
+        multiprocessing.cpu_count(),
+        maxtasksperchild=10000000000000
+        )
+    
+    parallelResults = poolOfProcesses.imap_unordered(
+        filterInputReads_pool_worker_function,
+        filterInputReads_task_generator(fw_file,rv_file,settings),
+        chunksize=100000
+        )
+    
+    for read_pair in parallelResults:
 
-        # If reverse read has a high AT content discard...
-        if not discard_read and do_AT_filter and \
-        ((sequence_rv.count("A") + sequence_rv.count("T")) / len(sequence_rv)) * 100 >= filter_AT_content:
-            dropped_AT += 1
-            discard_read = True
-
-        # If reverse read has a high GC content discard...
-        if not discard_read and do_GC_filter and \
-        ((sequence_rv.count("G") + sequence_rv.count("C")) / len(sequence_rv)) * 100 >= filter_GC_content:
-            dropped_GC += 1
-            discard_read = True
-                           
-        # Store the original reads to write them to the discarded output if applies
-        if keep_discarded_files:    
-            orig_sequence_rv = sequence_rv
-            orig_quality_rv = quality_rv 
-            
-        if not discard_read:
-            # if indicated we remove the artifacts PolyA from reverse reads
-            if do_adaptorA and len(sequence_rv) > min_length: 
-                sequence_rv, quality_rv = removeAdaptor(sequence_rv, quality_rv, 
-                                                        adaptorA, adaptor_missmatches) 
-            # if indicated we remove the artifacts PolyT from reverse reads
-            if do_adaptorT and len(sequence_rv) > min_length: 
-                sequence_rv, quality_rv = removeAdaptor(sequence_rv, quality_rv, 
-                                                        adaptorT, adaptor_missmatches) 
-            # if indicated we remove the artifacts PolyG from reverse reads
-            if do_adaptorG and len(sequence_rv) > min_length: 
-                sequence_rv, quality_rv = removeAdaptor(sequence_rv, quality_rv, 
-                                                        adaptorG, adaptor_missmatches) 
-            # if indicated we remove the artifacts PolyC from reverse reads
-            if do_adaptorC and len(sequence_rv) > min_length: 
-                sequence_rv, quality_rv = removeAdaptor(sequence_rv, quality_rv, 
-                                                        adaptorC, adaptor_missmatches)
-                
-            # if indicated we remove the artifacts PolyC from reverse reads
-            if do_adaptorN and len(sequence_rv) > min_length: 
-                sequence_rv, quality_rv = removeAdaptor(sequence_rv, quality_rv, 
-                                                        adaptorN, adaptor_missmatches)
-                
-            # Check if the read is smaller than the minimum after removing artifacts   
-            if len(sequence_rv) < min_length:
-                dropped_adaptor += 1
-                discard_read = True
-            else:              
-                # Trim reverse read (will return None if length of trimmed sequence is less than min_length)
-                sequence_rv, quality_rv = trim_quality(sequence_rv, quality_rv, 
-                                                       min_qual, min_length, phred)
-                if not sequence_rv or not quality_rv:
-                    discard_read = True
-            
+        read_pair_counters['total_reads'] += 1
+        if read_pair['discard_reson'] == 'dropped_umi_template': read_pair_counters['dropped_umi_template'] += 1
+        if read_pair['discard_reson'] == 'dropped_umi':          read_pair_counters['dropped_umi'] += 1
+        if read_pair['discard_reson'] == 'dropped_AT':           read_pair_counters['dropped_AT'] += 1
+        if read_pair['discard_reson'] == 'dropped_GC':           read_pair_counters['dropped_GC'] += 1
+        if read_pair['discard_reson'] == 'dropped_adaptor':      read_pair_counters['dropped_adaptor'] += 1                
+        
         # Write reverse read to output
-        if not discard_read:
-            out_rv_writer.send((header_rv, sequence_rv, quality_rv))
-            out_fw_writer.send((header_fw, sequence_fw, quality_fw))
+        if not read_pair['discard_reson']:
+            out_rv_writer.send((read_pair['header_rv'], read_pair['sequence_rv'], read_pair['quality_rv']))
+            out_fw_writer.send((read_pair['header_fw'], read_pair['sequence_fw'], read_pair['quality_fw']))
         else:
-            dropped_rv += 1  
+            read_pair_counters['dropped_rv'] += 1  
             if keep_discarded_files:
-                out_rv_writer_discarded.send((header_rv, orig_sequence_rv, orig_quality_rv))
+                out_rv_writer_discarded.send((read_pair['header_rv'], read_pair['orig_sequence_rv'], read_pair['orig_quality_rv']))
+    
+    poolOfProcesses.close()
+    poolOfProcesses.join()
     
     fw_file.close()
     rv_file.close()
@@ -388,16 +447,16 @@ def filterInputReads(fw,
         out_rv_writer_discarded.close()
         
     # Write info to the log
-    logger.info("Trimming stats total reads (pair): {}".format(total_reads))
-    logger.info("Trimming stats {} reads have been dropped!".format(dropped_rv)) 
-    perc2 = '{percent:.2%}'.format(percent= float(dropped_rv) / float(total_reads) )
+    logger.info("Trimming stats total reads (pair): {}".format(read_pair_counters['total_reads']))
+    logger.info("Trimming stats {} reads have been dropped!".format(read_pair_counters['dropped_rv'])) 
+    perc2 = '{percent:.2%}'.format(percent= float(read_pair_counters['dropped_rv']) / float(read_pair_counters['total_reads']) )
     logger.info("Trimming stats you just lost about {} of your data".format(perc2))
-    logger.info("Trimming stats reads remaining: {}".format(total_reads - dropped_rv))
-    logger.info("Trimming stats dropped pairs due to incorrect UMI: {}".format(dropped_umi_template))
-    logger.info("Trimming stats dropped pairs due to low quality UMI: {}".format(dropped_umi))
-    logger.info("Trimming stats dropped pairs due to high AT content: {}".format(dropped_AT))
-    logger.info("Trimming stats dropped pairs due to high GC content: {}".format(dropped_GC))
-    logger.info("Trimming stats dropped pairs due to presence of artifacts: {}".format(dropped_adaptor))
+    logger.info("Trimming stats reads remaining: {}".format(read_pair_counters['total_reads'] - read_pair_counters['dropped_rv']))
+    logger.info("Trimming stats dropped pairs due to incorrect UMI: {}".format(read_pair_counters['dropped_umi_template']))
+    logger.info("Trimming stats dropped pairs due to low quality UMI: {}".format(read_pair_counters['dropped_umi']))
+    logger.info("Trimming stats dropped pairs due to high AT content: {}".format(read_pair_counters['dropped_AT']))
+    logger.info("Trimming stats dropped pairs due to high GC content: {}".format(read_pair_counters['dropped_GC']))
+    logger.info("Trimming stats dropped pairs due to presence of artifacts: {}".format(read_pair_counters['dropped_adaptor']))
     
     # Check that output file was written ok
     if not fileOk(out_rw):
@@ -407,10 +466,10 @@ def filterInputReads(fw,
         raise RuntimeError(error)
     
     # Adding stats to QA Stats object
-    qa_stats.input_reads_forward = total_reads
-    qa_stats.input_reads_reverse = total_reads
-    qa_stats.reads_after_trimming_forward = (total_reads - dropped_rv)
-    qa_stats.reads_after_trimming_reverse = (total_reads - dropped_rv)
+    qa_stats.input_reads_forward = read_pair_counters['total_reads']
+    qa_stats.input_reads_reverse = read_pair_counters['total_reads']
+    qa_stats.reads_after_trimming_forward = (read_pair_counters['total_reads'] - read_pair_counters['dropped_rv'])
+    qa_stats.reads_after_trimming_reverse = (read_pair_counters['total_reads'] - read_pair_counters['dropped_rv'])
 
 #TODO this approach uses too much memory
 #     find a better solution (maybe Cython or C++)
