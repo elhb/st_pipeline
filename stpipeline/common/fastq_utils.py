@@ -276,6 +276,7 @@ def filterInputReads(fw,
                      rv,
                      out_fw,
                      out_rw,
+                     bam_out,
                      out_rw_discarded,
                      filter_AT_content,
                      filter_GC_content,
@@ -303,8 +304,9 @@ def filterInputReads(fw,
     Reads that do not pass the filters are discarded (both R1 and R2)
     :param fw: the fastq file with the forward reads
     :param rv: the fastq file with the reverse reads
-    :param out_fw: the name of the output file for the forward reads
-    :param out_rw: the name of the output file for the reverse reads
+    :param out_fw: the name of the output file for the forward reads, use "None" to disable
+    :param out_rw: the name of the output file for the reverse reads, use "None" to disable
+    :param bam_out: the name of the bam file for reads output, use "None" to disable
     :param out_rw_discarded: the name of the output file for discarded reverse reads
     :param filter_AT_content: % of A and T bases a read2 must have to be discarded
     :param filter_GC_content: % of G and C bases a read2 must have to be discarded
@@ -333,10 +335,16 @@ def filterInputReads(fw,
     keep_discarded_files = out_rw_discarded is not None
     
     # Create output file writers
-    out_rv_handle = safeOpenFile(out_rw, 'w')
-    out_rv_writer = writefq(out_rv_handle)
-    out_fw_handle = safeOpenFile(out_fw, 'w')
-    out_fw_writer = writefq(out_fw_handle)
+    if bam_out:
+        import pysam
+        bam_header = { 'HD': {'VN': '1', 'SO':'unsorted'} }
+        bam_file = pysam.AlignmentFile(bam_out, "wb", header=bam_header)
+    if out_rw:
+        out_rv_handle = safeOpenFile(out_rw, 'w')
+        out_rv_writer = writefq(out_rv_handle)
+    if out_fw:
+        out_fw_handle = safeOpenFile(out_fw, 'w')
+        out_fw_writer = writefq(out_fw_handle)
     if keep_discarded_files:
         out_rv_handle_discarded = safeOpenFile(out_rw_discarded, 'w')
         out_rv_writer_discarded = writefq(out_rv_handle_discarded)
@@ -424,9 +432,18 @@ def filterInputReads(fw,
         if read_pair['discard_reson'] == 'dropped_adaptor':      read_pair_counters['dropped_adaptor'] += 1                
         
         # Write reverse read to output
+        
         if not read_pair['discard_reson']:
-            out_rv_writer.send((read_pair['header_rv'], read_pair['sequence_rv'], read_pair['quality_rv']))
-            out_fw_writer.send((read_pair['header_fw'], read_pair['sequence_fw'], read_pair['quality_fw']))
+            if bam_out:
+                bam_record = pysam.AlignedSegment()
+                bam_record.query_name      = read_pair['header_rv']
+                bam_record.query_sequence  = read_pair['sequence_rv']
+                bam_record.query_qualities = read_pair['quality_rv']
+                bam_record.set_tag('r1',read_pair['sequence_fw']) # need barcode coordinates ie start and length if this is to be the barcode sequence only and not the complete R1 sequence would look like: bam_record.set_tag('B0',read_pair['sequence_fw'][barcode_start_position:barcode_start_position+barcode_length])
+                bam_record.set_tag('B3',read_pair['umi_seq'])
+                bam_file.write( bam_record )
+            if out_rw: out_rv_writer.send((read_pair['header_rv'], read_pair['sequence_rv'], read_pair['quality_rv']))
+            if out_fw: out_fw_writer.send((read_pair['header_fw'], read_pair['sequence_fw'], read_pair['quality_fw']))
         else:
             read_pair_counters['dropped_rv'] += 1  
             if keep_discarded_files:
@@ -437,12 +454,17 @@ def filterInputReads(fw,
     
     fw_file.close()
     rv_file.close()
-    out_rv_handle.flush()
-    out_rv_handle.close()
-    out_rv_writer.close()
-    out_fw_handle.flush()
-    out_rv_writer.close()
-    out_fw_writer.close()
+    
+    if bam_out:
+        bam_file.close()
+    if out_rw:
+        out_rv_handle.flush()
+        out_rv_handle.close()
+        out_rv_writer.close()
+    if out_fw:
+        out_fw_handle.flush()
+        out_fw_handle.close()
+        out_fw_writer.close()
     if keep_discarded_files:
         out_rv_handle_discarded.flush()
         out_rv_handle_discarded.close()
