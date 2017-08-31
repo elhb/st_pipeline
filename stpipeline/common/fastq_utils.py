@@ -216,13 +216,15 @@ def filterInputReads_pool_worker_function(task):
                 
     # If we want to check for UMI quality and the UMI is incorrect
     # then we discard the reads
+    read_pair['umi_seq'] = read_pair['sequence_fw'][settings['umi_start']:settings['umi_end']]
     if settings['umi_filter'] \
-    and not check_umi_template(read_pair['sequence_fw'][settings['umi_start']:settings['umi_end']], settings['umi_filter_template']):
+    and not check_umi_template(read_pair['umi_seq'], settings['umi_filter_template']):
         read_pair['discard_reson'] = 'dropped_umi_template'
     
     # Check if the UMI has many low quality bases
+    read_pair['umi_qual'] = read_pair['quality_fw'][settings['umi_start']:settings['umi_end']]
     if not read_pair['discard_reson'] and (settings['umi_end'] - settings['umi_start']) >= settings['umi_quality_bases'] and \
-    len([b for b in read_pair['quality_fw'][settings['umi_start']:settings['umi_end']] if (ord(b) - settings['phred']) < settings['min_qual']]) > settings['umi_quality_bases']:
+    len([b for b in read_pair['umi_qual'] if (ord(b) - settings['phred']) < settings['min_qual']]) > settings['umi_quality_bases']:
         read_pair['discard_reson'] = 'dropped_umi'
 
     # If reverse read has a high AT content discard...
