@@ -214,16 +214,21 @@ def filterInputReads_pool_worker_function(task):
     if read_pair['header_fw'].split()[0] != read_pair['header_rv'].split()[0]:
         logger.warning("Pair reads found with different " \
                        "names {} and {}".format(read_pair['header_fw'],read_pair['header_rv']))
+
+    # get the barcode sequence
+    read_pair['barcode'] = read_pair['sequence_fw'][settings['start_position']:(settings['start_position']+settings['barcode_length'])]
                 
     # If we want to check for UMI quality and the UMI is incorrect
     # then we discard the reads
+    read_pair['umi_seq'] = read_pair['sequence_fw'][settings['umi_start']:settings['umi_end']]
     if settings['umi_filter'] \
-    and not check_umi_template(read_pair['sequence_fw'][settings['umi_start']:settings['umi_end']], settings['umi_filter_template']):
+    and not check_umi_template( read_pair['umi_seq'], settings['umi_filter_template']):
         read_pair['discard_reson'] = 'dropped_umi_template'
-    
+
     # Check if the UMI has many low quality bases
+    read_pair['umi_qual'] = read_pair['quality_fw'][settings['umi_start']:settings['umi_end']]
     if not read_pair['discard_reson'] and (settings['umi_end'] - settings['umi_start']) >= settings['umi_quality_bases'] and \
-    len([b for b in read_pair['quality_fw'][settings['umi_start']:settings['umi_end']] if (ord(b) - settings['phred']) < settings['min_qual']]) > settings['umi_quality_bases']:
+    len([b for b in read_pair['umi_qual'] if (ord(b) - settings['phred']) < settings['min_qual']]) > settings['umi_quality_bases']:
         read_pair['discard_reson'] = 'dropped_umi'
 
     # If reverse read has a high AT content discard...
@@ -429,7 +434,9 @@ def filterInputReads(fw,
         'adaptor_missmatches':adaptor_missmatches,
         'min_length':min_length,
         'min_qual':min_qual,
-        'phred':phred
+        'phred':phred,
+        'barcode_length':barcode_length,
+        'start_position':start_position
     }
     
     import multiprocessing
@@ -447,9 +454,6 @@ def filterInputReads(fw,
     
     for read_pair in parallelResults:
         
-        # get the barcode sequence
-        barcode = read_pair['sequence_fw'][start_position:(start_position+barcode_length)]
-        
         read_pair_counters['total_reads'] += 1
         if read_pair['discard_reson'] == 'dropped_umi_template': read_pair_counters['dropped_umi_template'] += 1
         if read_pair['discard_reson'] == 'dropped_umi':          read_pair_counters['dropped_umi'] += 1
@@ -458,8 +462,14 @@ def filterInputReads(fw,
         if read_pair['discard_reson'] == 'dropped_adaptor':      read_pair_counters['dropped_adaptor'] += 1                
         
         # Write reverse read to output
-        if not discard_read:
-            aligned_segment = convert_to_AlignedSegment(header_rv,sequence_rv,quality_rv,barcode,umi_seq)
+        if not read_pair['discard_reson']:
+            aligned_segment = convert_to_AlignedSegment(
+                read_pair['header_rv'],
+                read_pair['sequence_rv'],
+                read_pair['quality_rv'],
+                read_pair['barcode'],
+                read_pair['umi_seq']
+                )
             bam_file.write( aligned_segment )
         else:
             read_pair_counters['dropped_rv'] += 1  
