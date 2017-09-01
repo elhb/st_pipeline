@@ -11,6 +11,7 @@ from itertools import izip
 from sqlitedict import SqliteDict
 import os
 import re
+import pysam
 
 def coroutine(func):
     """ 
@@ -270,11 +271,40 @@ def filterInputReads_pool_worker_function(task):
     
     return read_pair
 
+def convert_to_AlignedSegment(header, sequence, quality, barcode_sequence, umi_sequence):
+    """
+    This function converts the input variables (header,sequence,quality,barcode_sequence,umi_sequence)
+    to a pysam.AlignedSegment with the umi and barcode informations as the following tags:
+        Tag  Value
+        "B0" barcode_sequence
+        "B3" umi_sequence
+    :param header: string with the header information
+    :param sequence: string with the DNA/RNA sequence
+    :param quality: string with the base calling quality values
+    :param barcode_sequence: string with the barcode sequence
+    :param umi_sequence: string with the unique molecular identifier sequence
+    """
+
+    # create
+    aligned_segment = pysam.AlignedSegment()
+
+    # Set the standard values
+    aligned_segment.query_name = header
+    aligned_segment.query_sequence = sequence
+    aligned_segment.query_qualities = quality
+
+    # Set the tags
+    aligned_segment.set_tag('B0',barcode_sequence)
+    aligned_segment.set_tag('B3',umi_sequence)
+
+    return aligned_segment
+
 def filterInputReads(fw, 
                      rv,
-                     out_fw,
-                     out_rw,
-                     out_rw_discarded,
+                     out_rv,
+                     out_rv_discarded,
+                     idFile,
+                     start_position,
                      filter_AT_content,
                      filter_GC_content,
                      umi_start, 
@@ -299,11 +329,12 @@ def filterInputReads(fw,
       - It checks for AT and GC content (optional)
       - It performs a sanity check on the UMI (optional)
     Reads that do not pass the filters are discarded (both R1 and R2)
-    :param fw: the fastq file with the forward reads
-    :param rv: the fastq file with the reverse reads
+    :param rv: the bam file with the reverse reads
     :param out_fw: the name of the output file for the forward reads
-    :param out_rw: the name of the output file for the reverse reads
-    :param out_rw_discarded: the name of the output file for discarded reverse reads
+    :param out_rv: the name of the output file for the reverse reads
+    :param out_rv_discarded: the name of the output file for discarded reverse reads
+    :param idFile: a tab delimited file (BARCODE - X - Y) containing all the barcodes
+    :param start_position: the start position of the barcode
     :param filter_AT_content: % of A and T bases a read2 must have to be discarded
     :param filter_GC_content: % of G and C bases a read2 must have to be discarded
     :param umi_start: the start position of the UMI
@@ -328,15 +359,13 @@ def filterInputReads(fw,
         raise RuntimeError(error)
     
     # Check if discarded files must be written out 
-    keep_discarded_files = out_rw_discarded is not None
+    keep_discarded_files = out_rv_discarded is not None
     
     # Create output file writers
-    out_rv_handle = safeOpenFile(out_rw, 'w')
-    out_rv_writer = writefq(out_rv_handle)
-    out_fw_handle = safeOpenFile(out_fw, 'w')
-    out_fw_writer = writefq(out_fw_handle)
+    bam_header = { 'HD': {'VN': '1', 'SO':'unsorted'} }
+    bam_file = pysam.AlignmentFile(out_rv, "wb", header=bam_header)
     if keep_discarded_files:
-        out_rv_handle_discarded = safeOpenFile(out_rw_discarded, 'w')
+        out_rv_handle_discarded = safeOpenFile(out_rv_discarded, 'w')
         out_rv_writer_discarded = writefq(out_rv_handle_discarded)
     
     # Some counters
@@ -368,6 +397,10 @@ def filterInputReads(fw,
     
     # Quality format
     phred = 64 if qual64 else 33
+    
+    # get the barcode length
+    from taggd.io.barcode_utils import read_barcode_file
+    barcode_length = len( read_barcode_file(idFile).values()[0].sequence )
     
     # Open fastq files with the fastq parser
     fw_file = safeOpenFile(fw, "rU")
@@ -413,7 +446,10 @@ def filterInputReads(fw,
         )
     
     for read_pair in parallelResults:
-
+        
+        # get the barcode sequence
+        barcode = read_pair['sequence_fw'][start_position:(start_position+barcode_length)]
+        
         read_pair_counters['total_reads'] += 1
         if read_pair['discard_reson'] == 'dropped_umi_template': read_pair_counters['dropped_umi_template'] += 1
         if read_pair['discard_reson'] == 'dropped_umi':          read_pair_counters['dropped_umi'] += 1
@@ -422,9 +458,9 @@ def filterInputReads(fw,
         if read_pair['discard_reson'] == 'dropped_adaptor':      read_pair_counters['dropped_adaptor'] += 1                
         
         # Write reverse read to output
-        if not read_pair['discard_reson']:
-            out_rv_writer.send((read_pair['header_rv'], read_pair['sequence_rv'], read_pair['quality_rv']))
-            out_fw_writer.send((read_pair['header_fw'], read_pair['sequence_fw'], read_pair['quality_fw']))
+        if not discard_read:
+            aligned_segment = convert_to_AlignedSegment(header_rv,sequence_rv,quality_rv,barcode,umi_seq)
+            bam_file.write( aligned_segment )
         else:
             read_pair_counters['dropped_rv'] += 1  
             if keep_discarded_files:
@@ -433,14 +469,10 @@ def filterInputReads(fw,
     poolOfProcesses.close()
     poolOfProcesses.join()
     
+    # Close files
     fw_file.close()
     rv_file.close()
-    out_rv_handle.flush()
-    out_rv_handle.close()
-    out_rv_writer.close()
-    out_fw_handle.flush()
-    out_rv_writer.close()
-    out_fw_writer.close()
+    bam_file.close()
     if keep_discarded_files:
         out_rv_handle_discarded.flush()
         out_rv_handle_discarded.close()
@@ -459,9 +491,9 @@ def filterInputReads(fw,
     logger.info("Trimming stats dropped pairs due to presence of artifacts: {}".format(read_pair_counters['dropped_adaptor']))
     
     # Check that output file was written ok
-    if not fileOk(out_rw):
+    if not fileOk(out_rv):
         error = "Error doing quality trimming checks of raw reads." \
-        "\nOutput file not present {}\n".format(out_rw)
+        "\nOutput file not present {}\n".format(out_rv)
         logger.error(error)
         raise RuntimeError(error)
     
