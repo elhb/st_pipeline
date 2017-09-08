@@ -206,6 +206,8 @@ class InputReadsFilter():
                 last_time = time.time()
                 last_count = count
 
+        self.input_read_queue.put( chunk )
+        
         if self.verbose:
             self.print_stat_line(start_time, last_time, count, last_count, identity)
             last_time = time.time()
