@@ -10,6 +10,7 @@ from itertools import izip
 from sqlitedict import SqliteDict
 import os
 import re
+import Queue
 
 class InputReadsFilter():
     """
@@ -135,13 +136,11 @@ class InputReadsFilter():
         # wait for reader to complete
         if self.verbose: sys.stderr.write('InputReadsFilter::INFO:: main process - waiting for reader.\n')
         self.reader.join()
-        print 'reader running',self.reader_running
         
         # wait for worker pool to complete
         if self.verbose: sys.stderr.write('InputReadsFilter::INFO:: main process - waiting for pool.\n')
         for process in self.worker_pool: process.join()
         self.workers_running.value = False
-        print 'worker running',self.workers_running
         
         # wait for writer to complete
         if self.verbose: sys.stderr.write('InputReadsFilter::INFO:: main process - waiting for writer.\n')
@@ -153,6 +152,7 @@ class InputReadsFilter():
         counter_connection_recv_end.close()
         self.counter_connection_send_end.close()
 
+        if self.verbose: sys.stderr.write('InputReadsFilter::INFO:: main process - updating logs and checking for prescence of files.\n')
         # Write info to the log
         self.logger.info("Trimming stats total reads (pair): {}".format(read_pair_counters['total_reads']))
         self.logger.info("Trimming stats {} reads have been dropped!".format(read_pair_counters['dropped_rv'])) 
@@ -177,6 +177,7 @@ class InputReadsFilter():
         qa_stats.input_reads_reverse = read_pair_counters['total_reads']
         qa_stats.reads_after_trimming_forward = (read_pair_counters['total_reads'] - read_pair_counters['dropped_rv'])
         qa_stats.reads_after_trimming_reverse = (read_pair_counters['total_reads'] - read_pair_counters['dropped_rv'])
+        if self.verbose: sys.stderr.write('InputReadsFilter::INFO:: main process - completed.\n')
         
     def input_files_reader(self, ):
 
@@ -325,7 +326,9 @@ class InputReadsFilter():
             
             while not self.input_read_queue.empty():
                 
-                in_chunk = self.input_read_queue.get()
+                try:
+                    in_chunk = self.input_read_queue.get(timeout=10)
+                except Queue.Empty: continue
                 out_chunk = []
                 for (header_fw, sequence_fw, quality_fw), (header_rv, sequence_rv, quality_rv) in in_chunk:
                     
