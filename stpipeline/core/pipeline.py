@@ -8,7 +8,7 @@ do sanity check and ultimately run the pipeline.
 from stpipeline.common.utils import *
 from stpipeline.core.mapping import alignReads, barcodeDemultiplexing
 from stpipeline.core.annotation import annotateReads
-from stpipeline.common.fastq_utils import filterInputReads, hashDemultiplexedReads
+from stpipeline.common.fastq_utils import hashDemultiplexedReads
 from stpipeline.common.sam_utils import filterMappedReads
 from stpipeline.common.stats import qa_stats
 from stpipeline.common.dataset import createDataset
@@ -610,7 +610,10 @@ class Pipeline():
         #=================================================================
         self.logger.info("Start filtering raw reads {}".format(globaltime.getTimestamp()))
         try:
-            filterInputReads(self.fastq_fw,
+            from stpipeline.common.filterInputReads import InputReadsFilter
+            filterInputReads = InputReadsFilter()
+            filterInputReads.input_arguments(
+                             self.fastq_fw,
                              self.fastq_rv,
                              FILENAMES["quality_trimmed_R1"],
                              FILENAMES["quality_trimmed_R2"],
@@ -631,6 +634,7 @@ class Pipeline():
                              self.umi_filter_template,
                              self.umi_quality_bases,
                              self.adaptor_missmatches)
+            filterInputReads.run()
         except Exception:
             raise
         
