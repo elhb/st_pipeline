@@ -181,11 +181,11 @@ class InputReadsFilter():
         
     def input_files_reader(self, ):
 
-        start_time = time.time()
-        count = 0
-        last_time = start_time
-        last_count = count
-        identity = 'READER'
+        cdef double start_time = time.time()
+        cdef int count = 0
+        cdef double last_time = start_time
+        cdef int last_count = count
+        cdef str identity = 'READER'
 
         if self.verbose: sys.stderr.write('InputReadsFilter::INFO:: Starting input files reader pid='+str(os.getpid())+'.\n')
 
@@ -195,7 +195,9 @@ class InputReadsFilter():
 
         if self.verbose: sys.stderr.write('InputReadsFilter::INFO:: input files reader - starting to parse reads.\n')
         if self.verbose: self.print_stat_line(start_time, last_time, count, last_count, identity, header=True)
-        chunk = []
+        cdef list chunk = []
+        cdef tuple read_one
+        cdef tuple read_two
         for read_one, read_two in izip(readfq(fw_file), readfq(rv_file)):
             chunk.append((read_one, read_two))
             if len(chunk) == self.chunk_size:
@@ -228,11 +230,11 @@ class InputReadsFilter():
 
     def output_files_writer(self, ):
 
-        start_time = time.time()
-        count = 0
-        last_time = start_time
-        last_count = count
-        identity = 'WRITER'
+        cdef double start_time = time.time()
+        cdef int count = 0
+        cdef double last_time = start_time
+        cdef int last_count = count
+        cdef str identity = 'WRITER'
 
         if self.verbose: sys.stderr.write('InputReadsFilter::INFO:: Starting output files writer pid='+str(os.getpid())+'.\n')
         
@@ -246,7 +248,7 @@ class InputReadsFilter():
             out_rv_writer_discarded = writefq(out_rv_handle_discarded)
         
         # Some counters
-        read_pair_counters = {
+        cdef dict read_pair_counters = {
             'total_reads':0,
             'dropped_rv':0,
             'dropped_umi':0,
@@ -255,6 +257,8 @@ class InputReadsFilter():
             'dropped_GC':0,
             'dropped_adaptor':0
         }
+        cdef list chunk
+        cdef dict read_pair
 
         if self.verbose: sys.stderr.write('InputReadsFilter::INFO:: output files writer - starting to parse reads from queue.\n')
         while self.workers_running.value or not self.output_read_queue.empty():

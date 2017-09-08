@@ -31,7 +31,11 @@ def readfq(fp): # this is a generator function
     :param fp: opened file descriptor
     :returns an iterator over tuples (name,sequence,quality)
     """
-    last = None # this is a buffer keeping the last unprocessed line
+    cdef str last = '' # this is a buffer keeping the last unprocessed line
+    cdef str l
+    cdef str name
+    cdef list seqs
+    cdef int leng
     while True: # mimic closure; is it a bad idea?
         if not last: # the first record or a record following a fastq
             for l in fp: # search for the start of the next record
@@ -40,7 +44,7 @@ def readfq(fp): # this is a generator function
                     break
         if not last: break
         #name, seqs, last = last[1:].partition(" ")[0], [], None
-        name, seqs, last = last[1:], [], None
+        name, seqs, last = last[1:], [], ''
         for l in fp: # read the sequence
             if l[0] in '@+>':
                 last = l[:-1]
@@ -55,7 +59,7 @@ def readfq(fp): # this is a generator function
                 seqs.append(l[:-1])
                 leng += len(l) - 1
                 if leng >= len(seq):  # have read enough quality
-                    last = None
+                    last = ''
                     yield name, seq, ''.join(seqs)  # yield a fastq record
                     break
             if last:  # reach EOF before reading enough quality
@@ -69,7 +73,9 @@ def writefq(fp):  # This is a coroutine
     Send a (header, sequence, quality) triple to the instance to write it to
     the specified file pointer.
     """
-    fq_format = '@{header}\n{sequence}\n+\n{quality}\n'
+    cdef str fq_format = '@{header}\n{sequence}\n+\n{quality}\n'
+    cdef tuple record
+    cdef str read
     try:
         while True:
             record = yield
