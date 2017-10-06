@@ -54,9 +54,10 @@ setup(
   url = 'https://github.com/SpatialTranscriptomicsResearch/st_pipeline',
   packages = find_packages(exclude=('tests*', 'utils', '*.pyx')),
   ext_modules=[
-    Extension('stpipeline.common.cdistance', ['stpipeline/common/cdistance.pyx']),
-    Extension('stpipeline.common.filterInputReads', ['stpipeline/common/filterInputReads.pyx']),
-    Extension('stpipeline.common.fastq_utils', ['stpipeline/common/fastq_utils.pyx'])
+        Extension('stpipeline.common.cdistance', ['stpipeline/common/cdistance.pyx']),
+        Extension('stpipeline.common.unique_events_parser', ['stpipeline/common/unique_events_parser.pyx']),
+        Extension('stpipeline.common.filterInputReads', ['stpipeline/common/filterInputReads.pyx']),
+        Extension('stpipeline.common.fastq_utils', ['stpipeline/common/fastq_utils.pyx'])
     ],
   include_package_data = True,
   zip_safe = False,
