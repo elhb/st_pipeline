@@ -145,22 +145,20 @@ def get_annotations(bam_file_name, return_queue=None):
                 annotations[line[1].split('XF:Z:')[1]] = int(line[0])
         else: break
 
+    errmsg = "A {} subprocess generated an error while running the stpipeline.common.sam_utils.get_annotations function.\n{}\n"
     stdout, stderr = samtools_view.communicate()
     if len(stderr) > 0:
-        msg = "A samtools view subprocess generated an error while running the stpipeline.common.sam_utils.get_annotations function.\n{}\n".format(stderr)
-        sys.stderr.write(msg)
+        sys.stderr.write(msg.format('samtools view',stderr))
         sys.exit(1)
 
     stdout, stderr = grep.communicate()
     if len(stderr) > 0:
-        msg = "A grep subprocess generated an error while running the stpipeline.common.sam_utils.get_annotations function.\n{}\n".format(stderr)
-        sys.stderr.write(msg)
+        sys.stderr.write(msg.format('grep',stderr))
         sys.exit(1)
 
     stdout, stderr = unique.communicate()
     if len(stderr) > 0:
-        msg = "A uniq subprocess generated an error while running the stpipeline.common.sam_utils.get_annotations function.\n{}\n".format(stderr)
-        sys.stderr.write(msg)
+        sys.stderr.write(msg.format('uniq',stderr))
         sys.exit(1)
 
     if return_queue:
