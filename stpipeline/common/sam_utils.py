@@ -89,8 +89,8 @@ def merge_bam(merged_file_name, files_to_merge, ubam=False, samtools=True):
 
         # check the completion of the samtools merge sub process
         stdout, stderr = samtools_merge.communicate()
-        if len(stderr) > 0:
-            msg = "The samtools merge subprocess generated an error while running the stpipeline.common.sam_utils.merge_bam function.\n{}\n".format(stderr)
+        if len(stderr) > 0 or samtools_merge.returncode != 0:
+            msg = "The samtools merge subprocess generated an error while running the stpipeline.common.sam_utils.merge_bam function (exit code {}).\n{}\n".format(samtools_merge.returncode,stderr)
             sys.stderr.write(msg)
             sys.exit(1)
 
