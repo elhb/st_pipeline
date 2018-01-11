@@ -65,7 +65,6 @@ def merge_bam(merged_file_name, files_to_merge, ubam=False, samtools=True):
         threads=len(files_to_merge)
         arguments = ['samtools','merge','-@',str(threads), merged_file_name]
         for filename in files_to_merge: arguments.append(filename)
-        print 'Staring CMD::', ' '.join(arguments)
         samtools_merge = subprocess.Popen(
             arguments,
             stdout=subprocess.PIPE,
