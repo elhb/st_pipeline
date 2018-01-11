@@ -1,19 +1,18 @@
-""" 
+"""
 This module contains some functions and utilities for ST SAM/BAM files
 """
 
 import pysam
-import time
 import subprocess
 import multiprocessing
 import sys
-        
-def convert_to_AlignedSegment(header, sequence, quality, 
+
+def convert_to_AlignedSegment(header, sequence, quality,
                               barcode_sequence, umi_sequence):
     """
-    This function converts the input variables 
+    This function converts the input variables
     (header,sequence,quality,barcode_sequence,umi_sequence)
-    to a unaligned pysam.AlignedSegment with the umi and barcode 
+    to a unaligned pysam.AlignedSegment with the umi and barcode
     informations as the following tags:
         Tag  Value
         "B0" barcode_sequence
@@ -57,10 +56,11 @@ def merge_bam(merged_file_name, files_to_merge, ubam=False, samtools=True):
     annotations = {}
 
     if samtools: # use samtools to merge the bamfile instead of pysam, should be faster
-        
-        if ubam: # this functionality is not implemented for unaligned bam files
+
+        if ubam: # the samtools merge version is not implemented for unaligned bam files
+            sys.stderr.write('The samtools merge version is not implemented for unaligned bam files.\n')
             raise NotImplementedError
-        
+
         # Start to merge the files
         threads=len(files_to_merge)
         arguments = ['samtools','merge','-@',str(threads), merged_file_name]
@@ -109,7 +109,7 @@ def merge_bam(merged_file_name, files_to_merge, ubam=False, samtools=True):
                     annotations[annotation] += 1
                 except KeyError:
                     annotations[annotation] = 1
-    
+
     return sum(annotations.values())
 
 def get_annotations(bam_file_name, return_queue=None):
@@ -118,24 +118,24 @@ def get_annotations(bam_file_name, return_queue=None):
     and returns a dictionary with counts for all values present
     """
     annotations = dict()
-    
+
     samtools_view = subprocess.Popen(
         ['samtools','view',bam_file_name],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE)
-    
+
     grep = subprocess.Popen(
         ['grep','-E','XF\:Z\:.+(\t|$)','--only-matching'],
         stdin=samtools_view.stdout,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE)
-    
+
     unique = subprocess.Popen(
         ['uniq','-c'],
         stdin=grep.stdout,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE)
-    
+
     while True:
         line = unique.stdout.readline().rstrip().lstrip().split()
         if line:
@@ -150,13 +150,13 @@ def get_annotations(bam_file_name, return_queue=None):
         msg = "A samtools view subprocess generated an error while running the stpipeline.common.sam_utils.get_annotations function.\n{}\n".format(stderr)
         sys.stderr.write(msg)
         sys.exit(1)
-    
+
     stdout, stderr = grep.communicate()
     if len(stderr) > 0:
         msg = "A grep subprocess generated an error while running the stpipeline.common.sam_utils.get_annotations function.\n{}\n".format(stderr)
         sys.stderr.write(msg)
         sys.exit(1)
-    
+
     stdout, stderr = unique.communicate()
     if len(stderr) > 0:
         msg = "A uniq subprocess generated an error while running the stpipeline.common.sam_utils.get_annotations function.\n{}\n".format(stderr)
