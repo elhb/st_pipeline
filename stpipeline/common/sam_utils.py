@@ -3,6 +3,10 @@ This module contains some functions and utilities for ST SAM/BAM files
 """
 
 import pysam
+import time
+import subprocess
+import multiprocessing
+import sys
         
 def convert_to_AlignedSegment(header, sequence, quality, 
                               barcode_sequence, umi_sequence):
@@ -40,7 +44,7 @@ def convert_to_AlignedSegment(header, sequence, quality,
 
     return aligned_segment
 
-def merge_bam(merged_file_name, files_to_merge, ubam=False, samtools=False):
+def merge_bam(merged_file_name, files_to_merge, ubam=False, samtools=True):
     """
     Function for merging partial bam files after annotation.
     also counts the number of reads for different types of annotations (the XF tags of the reads)
@@ -51,8 +55,45 @@ def merge_bam(merged_file_name, files_to_merge, ubam=False, samtools=False):
     :returns: the number of annotated records
     """
     annotations = {}
-    if samtools:
-        raise NotImplementedError
+
+    if samtools: # use samtools to merge the bamfile instead of pysam, should be faster
+        
+        if ubam: # this functionality is not implemented for unaligned bam files
+            raise NotImplementedError
+        
+        # Start to merge the files
+        threads=len(files_to_merge)
+        arguments = ['samtools','merge','-@',str(threads), merged_file_name]
+        for filename in files_to_merge: arguments.append(filename)
+        print 'Staring CMD::', ' '.join(arguments)
+        samtools_merge = subprocess.Popen(
+            arguments,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE)
+
+        # get the annotations in parallel
+        keyword_arguments = { 'return_queue':multiprocessing.Queue() }
+        sub_processes = [
+                multiprocessing.Process(target=get_annotations, args=[bam_file_name], kwargs=keyword_arguments)
+                for bam_file_name in files_to_merge
+            ]
+        for process in sub_processes: process.start()
+        for process in sub_processes: process.join()
+        while not keyword_arguments['return_queue'].empty():
+            temp_dict = keyword_arguments['return_queue'].get()
+            for annotation,count in temp_dict.iteritems():
+                try:
+                    annotations[annotation] += count
+                except KeyError:
+                    annotations[annotation] = count
+
+        # check the completion of the samtools merge sub process
+        stdout, stderr = samtools_merge.communicate()
+        if len(stderr) > 0:
+            msg = "The samtools merge subprocess generated an error while running the stpipeline.common.sam_utils.merge_bam function.\n{}\n".format(stderr)
+            sys.stderr.write(msg)
+            sys.exit(1)
+
     else:
         with pysam.AlignmentFile(files_to_merge[0], mode='rb', check_sq=(not ubam)) as input_bamfile:
             merged_file = pysam.AlignmentFile(merged_file_name,
@@ -68,4 +109,61 @@ def merge_bam(merged_file_name, files_to_merge, ubam=False, samtools=False):
                     annotations[annotation] += 1
                 except KeyError:
                     annotations[annotation] = 1
-        return sum(annotations.values())
+    
+    return sum(annotations.values())
+
+def get_annotations(bam_file_name, return_queue=None):
+    """
+    Function that extracts the values of the XF tag in a bam file (gene_id from the annotation step)
+    and returns a dictionary with counts for all values present
+    """
+    annotations = dict()
+    
+    samtools_view = subprocess.Popen(
+        ['samtools','view',bam_file_name],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE)
+    
+    grep = subprocess.Popen(
+        ['grep','-E','XF\:Z\:.+(\t|$)','--only-matching'],
+        stdin=samtools_view.stdout,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE)
+    
+    unique = subprocess.Popen(
+        ['uniq','-c'],
+        stdin=grep.stdout,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE)
+    
+    while True:
+        line = unique.stdout.readline().rstrip().lstrip().split()
+        if line:
+            try:
+                annotations[line[1].split('XF:Z:')[1]] += int(line[0])
+            except KeyError:
+                annotations[line[1].split('XF:Z:')[1]] = int(line[0])
+        else: break
+
+    stdout, stderr = samtools_view.communicate()
+    if len(stderr) > 0:
+        msg = "A samtools view subprocess generated an error while running the stpipeline.common.sam_utils.get_annotations function.\n{}\n".format(stderr)
+        sys.stderr.write(msg)
+        sys.exit(1)
+    
+    stdout, stderr = grep.communicate()
+    if len(stderr) > 0:
+        msg = "A grep subprocess generated an error while running the stpipeline.common.sam_utils.get_annotations function.\n{}\n".format(stderr)
+        sys.stderr.write(msg)
+        sys.exit(1)
+    
+    stdout, stderr = unique.communicate()
+    if len(stderr) > 0:
+        msg = "A uniq subprocess generated an error while running the stpipeline.common.sam_utils.get_annotations function.\n{}\n".format(stderr)
+        sys.stderr.write(msg)
+        sys.exit(1)
+
+    if return_queue:
+        return_queue.put(annotations)
+    else:
+        return annotations
