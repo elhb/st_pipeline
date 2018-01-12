@@ -76,8 +76,20 @@ def merge_bam(merged_file_name, files_to_merge, ubam=False, samtools=True):
                 multiprocessing.Process(target=get_annotations, args=[bam_file_name], kwargs=keyword_arguments)
                 for bam_file_name in files_to_merge
             ]
+
         for process in sub_processes: process.start()
+
+        while True in [process.is_alive() for process in sub_processes]:
+            while not keyword_arguments['return_queue'].empty():
+                temp_dict = keyword_arguments['return_queue'].get()
+                for annotation,count in temp_dict.iteritems():
+                    try:
+                        annotations[annotation] += count
+                    except KeyError:
+                        annotations[annotation] = count
+
         for process in sub_processes: process.join()
+
         while not keyword_arguments['return_queue'].empty():
             temp_dict = keyword_arguments['return_queue'].get()
             for annotation,count in temp_dict.iteritems():
