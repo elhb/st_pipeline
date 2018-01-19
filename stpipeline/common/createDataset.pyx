@@ -97,6 +97,28 @@ class DatasetCreator():
         list_row_values = list()
         list_indexes = list()   
 
+    def run(self, ):
+        
+        # create workers
+        threads = multiprocessing.cpu_count()
+        self.workers = [worker_process() for i in range(threads)]
+        
+        # create gene controller
+        self.gene_controller = gene_controller(self.gff_filename, [self.input_file])
+        self.gene_controller.get_genes()
+        self.gene_controller.get_read_counts()
+        self.gene_controller.connect_to_workers()
+        
+        counts_table = self.gene_controller.collect_results()
+        
+        # connect them by queues/pipes
+        # start them
+        # monior their progress
+        # kill them
+        # clean up
+        pass
+
+
     def partial_original_function(self,):
         # Parse unique events to generate the unique counts and the BED file    
         unique_events_parser = uniqueEventsParser(self.input_file, self.gff_filename)
@@ -201,33 +223,6 @@ class DatasetCreator():
         # Write data frame to file
         counts_table.to_csv(os.path.join(self.output_folder, filenameDataFrame), sep="\t", na_rep=0)       
 
-
-class main_controller():
-
-    def __init__(self, threads, gff_filename, input_file_names):
-        self.threads = threads
-        self.gff_filename = gff_filename
-        self.input_file_names = input_file_names
-
-    def run(self, ):
-        
-        # create workers
-        self.workers = [worker_process() for i in range(threads)]
-        
-        # create gene controller
-        self.gene_controller = gene_controller(self.gff_filename, self.input_file_names)
-        self.gene_controller.get_genes()
-        self.gene_controller.get_read_counts()
-        self.gene_controller.connect_to_workers()
-        
-        counts_table = self.gene_controller.collect_results()
-        
-        # connect them by queues/pipes
-        # start them
-        # monior their progress
-        # kill them
-        # clean up
-        pass
 
 class gene_controller():
 
