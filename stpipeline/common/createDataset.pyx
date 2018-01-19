@@ -47,16 +47,27 @@ class DatasetCreator():
         :type verbose: bool
         :raises: RuntimeError,ValueError,OSError,CalledProcessError
         """
-        logger = logging.getLogger("STPipeline")
-        
-        if not os.path.isfile(input_file):
-            error = "Error creating dataset, input file not present {}\n".format(input_file)
-            logger.error(error)
+
+        self.input_file = input_file
+        self.qa_stats = qa_stats
+        self.gff_filename = gff_filename
+        self.umi_cluster_algorithm = umi_cluster_algorithm
+        self.umi_allowed_mismatches = umi_allowed_mismatches
+        self.umi_counting_offset = umi_counting_offset
+        self.output_folder = output_folder
+        self.output_template = output_template
+        self.verbose = verbose
+
+        self.logger = logging.getLogger("STPipeline")
+                    
+        if not os.path.isfile(self.input_file):
+            error = "Error creating dataset, input file not present {}\n".format(self.input_file)
+            self.logger.error(error)
             raise RuntimeError(error)
           
-        if output_template:
-            filenameDataFrame = "{}_stdata.tsv".format(output_template)
-            filenameReadsBED = "{}_reads.bed".format(output_template)
+        if self.output_template:
+            filenameDataFrame = "{}_stdata.tsv".format(self.output_template)
+            filenameReadsBED = "{}_reads.bed".format(self.output_template)
         else:
             filenameDataFrame = "stdata.tsv"
             filenameReadsBED = "reads.bed"
@@ -66,20 +77,20 @@ class DatasetCreator():
         discarded_reads = 0
         
         # Obtain the clustering function
-        if umi_cluster_algorithm == "naive":
+        if self.umi_cluster_algorithm == "naive":
             group_umi_func = countUMINaive
-        elif umi_cluster_algorithm == "hierarchical":
+        elif self.umi_cluster_algorithm == "hierarchical":
             group_umi_func = countUMIHierarchical
-        elif umi_cluster_algorithm == "Adjacent":
+        elif self.umi_cluster_algorithm == "Adjacent":
             group_umi_func = dedup_adj
-        elif umi_cluster_algorithm == "AdjacentBi":
+        elif self.umi_cluster_algorithm == "AdjacentBi":
             group_umi_func = dedup_dir_adj
-        elif umi_cluster_algorithm == "Affinity":
+        elif self.umi_cluster_algorithm == "Affinity":
             group_umi_func = affinity_umi_removal
         else:
             error = "Error creating dataset.\n" \
-            "Incorrect clustering algorithm {}".format(umi_cluster_algorithm)
-            logger.error(error)
+            "Incorrect clustering algorithm {}".format(self.umi_cluster_algorithm)
+            self.logger.error(error)
             raise RuntimeError(error)
      
         # Containers needed to create the data frame
@@ -87,8 +98,8 @@ class DatasetCreator():
         list_indexes = list()   
     
         # Parse unique events to generate the unique counts and the BED file    
-        unique_events_parser = uniqueEventsParser(input_file, gff_filename)
-        with open(os.path.join(output_folder, filenameReadsBED), "w") as reads_handler: ######################################## DO WE EVEN NEEED THE BEDFILE!?!?! ###############
+        unique_events_parser = uniqueEventsParser(self.input_file, self.gff_filename)
+        with open(os.path.join(self.output_folder, filenameReadsBED), "w") as reads_handler: ######################################## DO WE EVEN NEEED THE BEDFILE!?!?! ###############
             # this is the generator returning a dictionary with spots for each gene
             for gene, spots in unique_events_parser.all_unique_events(): 
                 transcript_counts_by_spot = {}
@@ -100,8 +111,8 @@ class DatasetCreator():
                     # Get the original number of transcripts (reads)
                     read_count = len(reads)
                     # Compute unique transcripts (based on UMI, strand and start position +- threshold)
-                    unique_transcripts = computeUniqueUMIs(reads, umi_counting_offset, 
-                                                           umi_allowed_mismatches, group_umi_func)
+                    unique_transcripts = computeUniqueUMIs(reads, self.umi_counting_offset, 
+                                                           self.umi_allowed_mismatches, group_umi_func)
                     # The new transcript count
                     transcript_count = len(unique_transcripts)
                     assert transcript_count > 0 and transcript_count <= read_count
@@ -129,7 +140,7 @@ class DatasetCreator():
                 
         if total_record == 0:
             error = "Error creating dataset, input file did not contain any transcript\n"
-            logger.error(error)
+            self.logger.error(error)
             raise RuntimeError(error)
         
         # Create the data frame
@@ -155,36 +166,36 @@ class DatasetCreator():
         std_genes_feature = np.std(aggregated_gene_counts)
             
         # Print some statistics
-        if verbose:
-            logger.info("Number of unique molecules present: {}".format(total_transcripts))
-            logger.info("Number of unique events (gene-feature) present: {}".format(total_record))
-            logger.info("Number of unique genes present: {}".format(number_genes))
-            logger.info("Max number of genes over all features: {}".format(max_genes_feature))
-            logger.info("Min number of genes over all features: {}".format(min_genes_feature))
-            logger.info("Max number of unique molecules over all features: {}".format(max_reads_feature))
-            logger.info("Min number of unique molecules over all features: {}".format(min_reads_feature))
-            logger.info("Average number genes per feature: {}".format(average_genes_feature))
-            logger.info("Average number unique molecules per feature: {}".format(average_reads_feature))
-            logger.info("Std number genes per feature: {}".format(std_genes_feature))
-            logger.info("Std number unique molecules per feature: {}".format(std_reads_feature))
-            logger.info("Max number of unique molecules over all unique events: {}".format(max_count))
-            logger.info("Min number of unique molecules over all unique events: {}".format(min_count))
-            logger.info("Number of discarded reads (possible duplicates): {}".format(discarded_reads))
+        if self.verbose:
+            self.logger.info("Number of unique molecules present: {}".format(total_transcripts))
+            self.logger.info("Number of unique events (gene-feature) present: {}".format(total_record))
+            self.logger.info("Number of unique genes present: {}".format(number_genes))
+            self.logger.info("Max number of genes over all features: {}".format(max_genes_feature))
+            self.logger.info("Min number of genes over all features: {}".format(min_genes_feature))
+            self.logger.info("Max number of unique molecules over all features: {}".format(max_reads_feature))
+            self.logger.info("Min number of unique molecules over all features: {}".format(min_reads_feature))
+            self.logger.info("Average number genes per feature: {}".format(average_genes_feature))
+            self.logger.info("Average number unique molecules per feature: {}".format(average_reads_feature))
+            self.logger.info("Std number genes per feature: {}".format(std_genes_feature))
+            self.logger.info("Std number unique molecules per feature: {}".format(std_reads_feature))
+            self.logger.info("Max number of unique molecules over all unique events: {}".format(max_count))
+            self.logger.info("Min number of unique molecules over all unique events: {}".format(min_count))
+            self.logger.info("Number of discarded reads (possible duplicates): {}".format(discarded_reads))
             
         # Update the QA object
-        qa_stats.reads_after_duplicates_removal = int(total_transcripts)
-        qa_stats.unique_events = total_record
-        qa_stats.barcodes_found = total_barcodes
-        qa_stats.genes_found = number_genes
-        qa_stats.duplicates_found = discarded_reads
-        qa_stats.max_genes_feature = max_genes_feature
-        qa_stats.min_genes_feature = min_genes_feature
-        qa_stats.max_reads_feature = max_reads_feature
-        qa_stats.min_reads_feature = min_reads_feature
-        qa_stats.max_reads_unique_event = max_count
-        qa_stats.min_reads_unique_event = min_count
-        qa_stats.average_gene_feature = average_genes_feature
-        qa_stats.average_reads_feature = average_reads_feature
+        self.qa_stats.reads_after_duplicates_removal = int(total_transcripts)
+        self.qa_stats.unique_events = total_record
+        self.qa_stats.barcodes_found = total_barcodes
+        self.qa_stats.genes_found = number_genes
+        self.qa_stats.duplicates_found = discarded_reads
+        self.qa_stats.max_genes_feature = max_genes_feature
+        self.qa_stats.min_genes_feature = min_genes_feature
+        self.qa_stats.max_reads_feature = max_reads_feature
+        self.qa_stats.min_reads_feature = min_reads_feature
+        self.qa_stats.max_reads_unique_event = max_count
+        self.qa_stats.min_reads_unique_event = min_count
+        self.qa_stats.average_gene_feature = average_genes_feature
+        self.qa_stats.average_reads_feature = average_reads_feature
          
         # Write data frame to file
-        counts_table.to_csv(os.path.join(output_folder, filenameDataFrame), sep="\t", na_rep=0)       
+        counts_table.to_csv(os.path.join(self.output_folder, filenameDataFrame), sep="\t", na_rep=0)       
