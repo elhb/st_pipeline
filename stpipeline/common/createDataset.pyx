@@ -312,10 +312,76 @@ class worker_process():
         self.genes = None
         self._process = multiprocessing.Process(target=self.worker_loop)
 
-    def get_genes(self,):
+    def get_gene(self, GENE_ID):
         # get the genes from the bamfiles
-        for gene in genes:
-            yield gene
+        sam_file = pysam.AlignmentFile(self.filename, "rb")
+
+        # define variables cython style for more efficient looping and in memory storage
+        cdef object rec
+        cdef str clear_name
+        cdef int mapping_quality
+        cdef int start
+        cdef int end
+        cdef str chrom
+        cdef str strand
+        cdef tuple transcript
+        cdef tuple spot_coordinates
+        cdef int x
+        cdef int y
+        cdef str gene
+        cdef dict spots
+
+        # Parse the coordinate sorted bamfile record by record i.e. by genome 
+        # coordinate from first chromosome to last
+        for rec in sam_file.fetch(GENE_REGION):
+
+            # get the info about the record from the bam file
+            clear_name = rec.query_name
+            mapping_quality = rec.mapping_quality
+
+            # Account for soft-clipped bases when retrieving the start/end coordinates
+            start = int(rec.reference_start - rec.query_alignment_start)
+            end = int(rec.reference_end + (rec.query_length - rec.query_alignment_end))
+            chrom = sam_file.getrname(rec.reference_id)
+            strand = "+"
+            if rec.is_reverse:
+                # We swap start and end if the transcript mapped to the reverse strand
+                strand = "-"
+                start, end = end, start
+
+            # Get TAGGD tags from the bam file
+            x,y,gene,umi = (-1,-1,'None','None')
+            for (k, v) in rec.tags:
+                if k == "B1":
+                    x = int(v) ## The X coordinate
+                elif k == "B2":
+                    y = int(v) ## The Y coordinate
+                elif k == "XF":
+                    gene = str(v) ## The gene name
+                elif k == "B3":
+                    umi = str(v) ## The UMI
+                else:
+                    continue
+            # Check that all tags are present
+            if 'None' in [gene,umi] or -1 in [x,y]:
+                logger.warning("Warning parsing annotated reads.\n" \
+                               "Missing attributes for record {}\n".format(clear_name))
+                continue
+            if GENE_ID != gene: continue
+
+            # Create a new transcript and add it to the in memory gene_buffer dictionary
+            transcript = (chrom, start, end, clear_name, mapping_quality, strand, umi)
+            spot_coordinates = (x,y)
+            
+            try:
+                spots[spot_coordinates].append(transcript)
+            except KeyError:
+                spots[spot_coordinates] = [transcript]
+            
+        yield GENE_ID, spots
+
+        # Close the bam file and yield the last gene(s)
+        sam_file.close()
 
     def worker_loop(self,):
         # do the umi clustering etc for one gene
