@@ -96,7 +96,8 @@ class DatasetCreator():
         # Containers needed to create the data frame
         list_row_values = list()
         list_indexes = list()   
-    
+
+    def partial_original_function(self,):
         # Parse unique events to generate the unique counts and the BED file    
         unique_events_parser = uniqueEventsParser(self.input_file, self.gff_filename)
         with open(os.path.join(self.output_folder, filenameReadsBED), "w") as reads_handler: ######################################## DO WE EVEN NEEED THE BEDFILE!?!?! ###############
