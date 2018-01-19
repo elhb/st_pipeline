@@ -116,67 +116,7 @@ class DatasetCreator():
         # monior their progress
         # kill them
         # clean up
-        pass
-
-
-    def partial_original_function(self,):
-        
-        # Create the data frame
-        counts_table = pd.DataFrame(list_row_values, index=list_indexes)
-        counts_table.fillna(0, inplace=True)
-        counts_table=counts_table.T # Transpose the dictionary to still get the spots as rows and genes as columns in the final tsv
-        
-        # Compute some statistics
-        total_barcodes = len(counts_table.index)
-        total_transcripts = np.sum(counts_table.values, dtype=np.int32)
-        number_genes = len(counts_table.columns)
-        max_count = counts_table.values.max()
-        min_count = counts_table.values.min()
-        aggregated_spot_counts = counts_table.sum(axis=1).values
-        aggregated_gene_counts = (counts_table != 0).sum(axis=1).values
-        max_genes_feature = aggregated_gene_counts.max()
-        min_genes_feature = aggregated_gene_counts.min()
-        max_reads_feature = aggregated_spot_counts.max()
-        min_reads_feature = aggregated_spot_counts.min()
-        average_reads_feature = np.mean(aggregated_spot_counts)
-        average_genes_feature = np.mean(aggregated_gene_counts)
-        std_reads_feature = np.std(aggregated_spot_counts)
-        std_genes_feature = np.std(aggregated_gene_counts)
-            
-        # Print some statistics
-        if self.verbose:
-            self.logger.info("Number of unique molecules present: {}".format(total_transcripts))
-            self.logger.info("Number of unique events (gene-feature) present: {}".format(total_record))
-            self.logger.info("Number of unique genes present: {}".format(number_genes))
-            self.logger.info("Max number of genes over all features: {}".format(max_genes_feature))
-            self.logger.info("Min number of genes over all features: {}".format(min_genes_feature))
-            self.logger.info("Max number of unique molecules over all features: {}".format(max_reads_feature))
-            self.logger.info("Min number of unique molecules over all features: {}".format(min_reads_feature))
-            self.logger.info("Average number genes per feature: {}".format(average_genes_feature))
-            self.logger.info("Average number unique molecules per feature: {}".format(average_reads_feature))
-            self.logger.info("Std number genes per feature: {}".format(std_genes_feature))
-            self.logger.info("Std number unique molecules per feature: {}".format(std_reads_feature))
-            self.logger.info("Max number of unique molecules over all unique events: {}".format(max_count))
-            self.logger.info("Min number of unique molecules over all unique events: {}".format(min_count))
-            self.logger.info("Number of discarded reads (possible duplicates): {}".format(discarded_reads))
-            
-        # Update the QA object
-        self.qa_stats.reads_after_duplicates_removal = int(total_transcripts)
-        self.qa_stats.unique_events = total_record
-        self.qa_stats.barcodes_found = total_barcodes
-        self.qa_stats.genes_found = number_genes
-        self.qa_stats.duplicates_found = discarded_reads
-        self.qa_stats.max_genes_feature = max_genes_feature
-        self.qa_stats.min_genes_feature = min_genes_feature
-        self.qa_stats.max_reads_feature = max_reads_feature
-        self.qa_stats.min_reads_feature = min_reads_feature
-        self.qa_stats.max_reads_unique_event = max_count
-        self.qa_stats.min_reads_unique_event = min_count
-        self.qa_stats.average_gene_feature = average_genes_feature
-        self.qa_stats.average_reads_feature = average_reads_feature
-         
-        # Write data frame to file
-        counts_table.to_csv(os.path.join(self.output_folder, filenameDataFrame), sep="\t", na_rep=0)       
+        pass       
 
 class gene_controller():
 
@@ -309,7 +249,62 @@ class gene_controller():
     def collect_results(self, ):
         # get gene spot combos from worker
         # Print spot gene combos to tsv file (mem or file)
-        pass
+        # Create the data frame
+        counts_table = pd.DataFrame(list_row_values, index=list_indexes)
+        counts_table.fillna(0, inplace=True)
+        counts_table=counts_table.T # Transpose the dictionary to still get the spots as rows and genes as columns in the final tsv
+        
+        # Compute some statistics
+        total_barcodes = len(counts_table.index)
+        total_transcripts = np.sum(counts_table.values, dtype=np.int32)
+        number_genes = len(counts_table.columns)
+        max_count = counts_table.values.max()
+        min_count = counts_table.values.min()
+        aggregated_spot_counts = counts_table.sum(axis=1).values
+        aggregated_gene_counts = (counts_table != 0).sum(axis=1).values
+        max_genes_feature = aggregated_gene_counts.max()
+        min_genes_feature = aggregated_gene_counts.min()
+        max_reads_feature = aggregated_spot_counts.max()
+        min_reads_feature = aggregated_spot_counts.min()
+        average_reads_feature = np.mean(aggregated_spot_counts)
+        average_genes_feature = np.mean(aggregated_gene_counts)
+        std_reads_feature = np.std(aggregated_spot_counts)
+        std_genes_feature = np.std(aggregated_gene_counts)
+            
+        # Print some statistics
+        if self.verbose:
+            self.logger.info("Number of unique molecules present: {}".format(total_transcripts))
+            self.logger.info("Number of unique events (gene-feature) present: {}".format(total_record))
+            self.logger.info("Number of unique genes present: {}".format(number_genes))
+            self.logger.info("Max number of genes over all features: {}".format(max_genes_feature))
+            self.logger.info("Min number of genes over all features: {}".format(min_genes_feature))
+            self.logger.info("Max number of unique molecules over all features: {}".format(max_reads_feature))
+            self.logger.info("Min number of unique molecules over all features: {}".format(min_reads_feature))
+            self.logger.info("Average number genes per feature: {}".format(average_genes_feature))
+            self.logger.info("Average number unique molecules per feature: {}".format(average_reads_feature))
+            self.logger.info("Std number genes per feature: {}".format(std_genes_feature))
+            self.logger.info("Std number unique molecules per feature: {}".format(std_reads_feature))
+            self.logger.info("Max number of unique molecules over all unique events: {}".format(max_count))
+            self.logger.info("Min number of unique molecules over all unique events: {}".format(min_count))
+            self.logger.info("Number of discarded reads (possible duplicates): {}".format(discarded_reads))
+            
+        # Update the QA object
+        self.qa_stats.reads_after_duplicates_removal = int(total_transcripts)
+        self.qa_stats.unique_events = total_record
+        self.qa_stats.barcodes_found = total_barcodes
+        self.qa_stats.genes_found = number_genes
+        self.qa_stats.duplicates_found = discarded_reads
+        self.qa_stats.max_genes_feature = max_genes_feature
+        self.qa_stats.min_genes_feature = min_genes_feature
+        self.qa_stats.max_reads_feature = max_reads_feature
+        self.qa_stats.min_reads_feature = min_reads_feature
+        self.qa_stats.max_reads_unique_event = max_count
+        self.qa_stats.min_reads_unique_event = min_count
+        self.qa_stats.average_gene_feature = average_genes_feature
+        self.qa_stats.average_reads_feature = average_reads_feature
+         
+        # Write data frame to file
+        counts_table.to_csv(os.path.join(self.output_folder, filenameDataFrame), sep="\t", na_rep=0)
 
 class worker_process():
 
