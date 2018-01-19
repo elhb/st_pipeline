@@ -1,14 +1,14 @@
 import sys
 import os
-import numpy as np
+import logging
+import multiprocessing
 from collections import defaultdict
+import numpy as np
 import pandas as pd
 from stpipeline.common.clustering import *
 from stpipeline.common.unique_events_parser import uniqueEventsParser
-import logging
-import sys
-
 from stpipeline.common.dataset import computeUniqueUMIs
+from stpipeline.common.gff_reader import gff_lines
 
 class DatasetCreator():
 
@@ -203,12 +203,24 @@ class DatasetCreator():
 
 class main_controller():
 
-    def __init__(self,):
-        pass
+    def __init__(self, threads, gff_filename, input_file_names):
+        self.threads = threads
+        self.gff_filename = gff_filename
+        self.input_file_names = input_file_names
 
-    def run(self,):
+    def run(self, ):
+        
         # create workers
+        self.workers = [worker_process() for i in range(threads)]
+        
         # create gene controller
+        self.gene_controller = gene_controller(self.gff_filename, self.input_file_names)
+        self.gene_controller.get_genes()
+        self.gene_controller.get_read_counts()
+        self.gene_controller.connect_to_workers()
+        
+        counts_table = self.gene_controller.collect_results()
+        
         # connect them by queues/pipes
         # start them
         # monior their progress
@@ -218,21 +230,131 @@ class main_controller():
 
 class gene_controller():
 
-    def __init__(self,):
+    def __init__(self, gff_filename, input_file_names):
         # create queues and other things
-        pass
+        self.gff_filename = gff_filename
+        self.input_file_names = input_file_names
+        self.genes = dict()
+        self.workers = []
+        self.results_queue = multiprocessing.Queue()
 
     def get_genes(self,):
+
         # Read gtf and get genes
+        self.get_gene_coordinates(self.gff_filename)
+
         # fetch read count per gene from bam files
             # also get ambiguos gene annotations from bam files
-            # genes = {gene_id:{name:gene_name, id:gene_id, start:start, end:end, read_count:read_count, files:{filename:read_count}} ...}
-        pass
+            # genes = { 'gene_id':{'name':gene_name, 'id':gene_id, 'sequence':chrom, 'start':start, 'end':end, 'read_count':read_count, 'files':{filename:read_count}} ...}
+        self.get_read_counts()
 
-    def connect_to_workers(self,):
+    def get_gene_coordinates(self, gff_filename):
+        """
+        function that reads the coordinates of genes
+        and save them as values of a dictionary with the gene ID as key
+        dict: [GENE_id] => gene_coordinate
+        """
+
+        cdef dict genes
+        cdef dict line
+        cdef str gene_id
+        cdef str seqname
+        cdef int start
+        cdef int end
+
+        genes = dict()
+
+        for line in gff_lines(gff_filename):
+
+            seqname = line['seqname']
+            start = int(line['start'])
+            end = int(line['end'])
+            gene_id = line['gene_id']
+
+            try:
+                if gene_id[0] == '"' and gene_id[-1] == '"': gene_id=gene_id[1:-1]
+            except KeyError:
+                raise ValueError(
+                    'The gene_id attribute is missing in the annotation file ({0})\n'.format(self.gff_filename)
+                    )
+            try:
+                if int(start) < genes[ gene_id ]['start']:genes[ gene_id ][ 'start' ]= int(end)
+                if int(end)   > genes[ gene_id ]['end']:  genes[ gene_id ][ 'end' ]  = int(end)
+            except KeyError:
+                genes[ gene_id ] = {
+                    'id':gene_id,
+                    'sequence':seqname,
+                    'start':start,
+                    'end':end,
+                    'read_count':0,
+                    'files':{}
+                    }
+
+        self.genes = genes
+
+    def get_read_counts(self,):
+        # from stpipeline.common.sam_utils import get_annotations
+        get_annotations = lambda ('gene_id',100,'pelle.bam') # mock function
+
+        keyword_arguments = { 'return_queue':multiprocessing.Queue(), 'return_filename'=True }
+        sub_processes = [
+                multiprocessing.Process(target=get_annotations, args=[bam_file_name], kwargs=keyword_arguments)
+                for bam_file_name in files_to_merge
+            ]
+
+        for process in sub_processes: process.start()
+
+        def empty_queue():
+            while not keyword_arguments['return_queue'].empty():
+                temp_dict = keyword_arguments['return_queue'].get()
+                for annotation,count,filename in temp_dict.iteritems():
+                    try:
+                        assert filename not in self.genes[annotation]['files']
+                        self.genes[annotation]['read_count'] += count
+                        self.genes[annotation]['files'][filename] = count
+                    except KeyError:
+                        if annotation[0:len('__ambiguous[')] == '__ambiguous[':#'GENE1+GENE2]'
+                            try: # to get the right most right most coordinate ;)
+                                ambiguous_gene_ids = annotation[len('__ambiguous['):-1].split('+')
+                                sequence_names = [ self.genes[gene_id]['sequence'] for gene_id in ambiguous_gene_ids ]
+                                assert len(set(sequence_names)) == 1
+                                self.gene[ annotation ] = {
+                                        'id':annotation,
+                                        'sequence':sequence_names[0],
+                                        'start':min([ self.genes[gene_id]['start'] for gene_id in ambiguous_gene_ids ]),
+                                        'end':max([ self.genes[gene_id]['end'] for gene_id in ambiguous_gene_ids ]),
+                                        'read_count':count,
+                                        'files':{filename:count}
+                                        }
+                            except KeyError:
+                                raise ValueError('ERROR:: gene with id {0} is not found in gtf file\n'.format(annotation))
+                        else:
+                            raise ValueError('ERROR:: gene with id {0} is not found in gtf file\n'.format(annotation))
+                        
+                        # IMPORTANT!!!! we do not capture any "__no_feature" annotations is this a problem?
+
+        while True in [process.is_alive() for process in sub_processes]: empty_queue()
+
+        for process in sub_processes: process.join()
+
+        empty_queue()
+
+    def connect_to_workers(self, workers):
         # sort genes by readcount and distribute to workers
             # put genes in queue for workers to process
-        pass
+
+        for worker in workers:
+            worker.genes=[]
+            worker.return_queue = self.results_queue
+
+        key=lambda x: x['read_count']
+        for gene in sorted(self.genes.values(),key=key,reverse=True)]:
+            workers[i].genes.append(gene)
+            i +=1
+            if i == len(workers): i=0
+        
+        for worker in workers:
+            worker.start()
 
     def collect_results(self, ):
         # get gene spot combos from worker
@@ -242,13 +364,18 @@ class gene_controller():
 class worker_process():
 
     def __init__(self,):
-        pass
+        self.genes = None
+        self._process = multiprocessing.Process(target=self.worker_loop)
 
     def get_genes(self,):
         # get the genes from the bamfiles
-        pass
+        for gene in genes:
+            yield gene
 
     def worker_loop(self,):
         # do the umi clustering etc for one gene
         # put results back to controller
-        pass
+        for gene in self.get_genes():
+            print gene
+
+
