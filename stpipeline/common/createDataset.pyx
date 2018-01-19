@@ -199,3 +199,56 @@ class DatasetCreator():
          
         # Write data frame to file
         counts_table.to_csv(os.path.join(self.output_folder, filenameDataFrame), sep="\t", na_rep=0)       
+
+
+class main_controller():
+
+    def __init__(self,):
+        pass
+
+    def run(self,):
+        # create workers
+        # create gene controller
+        # connect them by queues/pipes
+        # start them
+        # monior their progress
+        # kill them
+        # clean up
+        pass
+
+class gene_controller():
+
+    def __init__(self,):
+        # create queues and other things
+        pass
+
+    def get_genes(self,):
+        # Read gtf and get genes
+        # fetch read count per gene from bam files
+            # also get ambiguos gene annotations from bam files
+            # genes = {gene_id:{name:gene_name, id:gene_id, start:start, end:end, read_count:read_count, files:{filename:read_count}} ...}
+        pass
+
+    def connect_to_workers(self,):
+        # sort genes by readcount and distribute to workers
+            # put genes in queue for workers to process
+        pass
+
+    def collect_results(self, ):
+        # get gene spot combos from worker
+        # Print spot gene combos to tsv file (mem or file)
+        pass
+
+class worker_process():
+
+    def __init__(self,):
+        pass
+
+    def get_genes(self,):
+        # get the genes from the bamfiles
+        pass
+
+    def worker_loop(self,):
+        # do the umi clustering etc for one gene
+        # put results back to controller
+        pass
