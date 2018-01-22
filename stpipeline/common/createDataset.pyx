@@ -167,7 +167,14 @@ class gene_controller():
         cdef int start
         cdef int end
 
-        genes = dict()
+        genes = {'__no_feature':{
+                    'id':'__no_feature',
+                    'sequence':None,
+                    'start':None,
+                    'end':None,
+                    'read_count':0,
+                    'files':{}
+                }}
 
         for line in gff_lines(gff_filename):
 
@@ -197,6 +204,33 @@ class gene_controller():
 
         self.genes = genes
 
+    def empty_read_counts_queue(self, keyword_arguments):
+        while not keyword_arguments['return_queue'].empty():
+            temp_dict,filename = keyword_arguments['return_queue'].get()
+            for annotation,count in temp_dict.iteritems():
+                try:
+                    assert filename not in self.genes[annotation]['files']
+                    self.genes[annotation]['read_count'] += count
+                    self.genes[annotation]['files'][filename] = count
+                except KeyError:
+                    if annotation[0:len('__ambiguous[')] == '__ambiguous[':#'GENE1+GENE2]'
+                        try: # to get the right most right most coordinate ;)
+                            ambiguous_gene_ids = annotation[len('__ambiguous['):-1].split('+')
+                            sequence_names = [ self.genes[gene_id]['sequence'] for gene_id in ambiguous_gene_ids ]
+                            assert len(set(sequence_names)) == 1
+                            self.genes[ annotation ] = {
+                                    'id':annotation,
+                                    'sequence':sequence_names[0],
+                                    'start':min([ self.genes[gene_id]['start'] for gene_id in ambiguous_gene_ids ]),
+                                    'end':max([ self.genes[gene_id]['end'] for gene_id in ambiguous_gene_ids ]),
+                                    'read_count':count,
+                                    'files':{filename:count}
+                                    }
+                        except KeyError:
+                            raise ValueError('ERROR:: gene with id {0} is not found in gtf file\n'.format(annotation))
+                    else:
+                        raise ValueError('ERROR:: gene with id {0} is not found in gtf file\n'.format(annotation))
+
     def get_read_counts(self,):
 
         print 'fetch annotations from bam files'
@@ -210,41 +244,11 @@ class gene_controller():
 
         for bam_file_name in self.input_file_names: pysam.index( bam_file_name, '{0}.bai'.format(bam_file_name) )
 
-        def empty_queue():
-            while not keyword_arguments['return_queue'].empty():
-                temp_dict,filename = keyword_arguments['return_queue'].get()
-                for annotation,count in temp_dict.iteritems():
-                    if annotation == '__no_feature': continue # THIS SHOULD BE FIXED SOMEHOW!! OR IGNORED BUT NOTED
-                    try:
-                        assert filename not in self.genes[annotation]['files']
-                        self.genes[annotation]['read_count'] += count
-                        self.genes[annotation]['files'][filename] = count
-                    except KeyError:
-                        if annotation[0:len('__ambiguous[')] == '__ambiguous[':#'GENE1+GENE2]'
-                            try: # to get the right most right most coordinate ;)
-                                ambiguous_gene_ids = annotation[len('__ambiguous['):-1].split('+')
-                                sequence_names = [ self.genes[gene_id]['sequence'] for gene_id in ambiguous_gene_ids ]
-                                assert len(set(sequence_names)) == 1
-                                self.genes[ annotation ] = {
-                                        'id':annotation,
-                                        'sequence':sequence_names[0],
-                                        'start':min([ self.genes[gene_id]['start'] for gene_id in ambiguous_gene_ids ]),
-                                        'end':max([ self.genes[gene_id]['end'] for gene_id in ambiguous_gene_ids ]),
-                                        'read_count':count,
-                                        'files':{filename:count}
-                                        }
-                            except KeyError:
-                                raise ValueError('ERROR:: gene with id {0} is not found in gtf file\n'.format(annotation))
-                        else:
-                            raise ValueError('ERROR:: gene with id {0} is not found in gtf file\n'.format(annotation))
-
-                        # IMPORTANT!!!! we do not capture any "__no_feature" annotations is this a problem?
-
-        while True in [process.is_alive() for process in sub_processes]: empty_queue()
+        while True in [process.is_alive() for process in sub_processes]: self.empty_read_counts_queue(keyword_arguments)
 
         for process in sub_processes: process.join()
 
-        empty_queue()
+        self.empty_read_counts_queue(keyword_arguments)
 
     def connect_to_workers(self, workers):
         # sort genes by readcount and distribute to workers
@@ -253,6 +257,15 @@ class gene_controller():
         for worker in workers:
             worker.genes=[]
             worker.return_queue = self.results_queue
+
+        no_feature = self.genes['__no_feature']
+        del(self.genes['__no_feature'])
+        no_feature_worker = None
+        if no_feature['read_count'] > 0:
+            no_feature_worker = workers[0]
+            workers = workers[1:]
+            no_feature_worker.genes.append(no_feature)
+            no_feature_worker.process.start()
 
         i = 0
         key=lambda x: x['read_count']
@@ -264,7 +277,7 @@ class gene_controller():
         for worker in workers:
             worker.process.start()
 
-    def empty_queue(self, ):
+    def empty_return_queue(self, ):
         while not self.results_queue.empty():
             gene_id, transcript_counts_by_spot, discarded_reads_worker = self.results_queue.get()
             print 'got gene {} in results collection'.format( gene_id )
@@ -288,12 +301,12 @@ class gene_controller():
         while True in [worker.process.is_alive() for worker in self.workers]:
             print 'empty queue call #',i;
             i +=1
-            self.empty_queue()
+            self.empty_return_queue()
             time.sleep(1)
         for worker in self.workers: worker.process.join()
         time.sleep(10)
         print 'empty queue call #',i,'(final)';
-        self.empty_queue()
+        self.empty_return_queue()
 
         # Print spot gene combos to tsv file (mem or file)
         # Create the data frame
@@ -398,7 +411,15 @@ class worker_process():
 
             # Parse the coordinate sorted bamfile record by record i.e. by genome
             # coordinate from first chromosome to last
-            for rec in sam_file.fetch( gene['sequence'], gene['start']-100, gene['end']+100 ):
+            if gene['start'] != None:
+                region_start_coord=gene['start']-100
+            else:
+                region_start_coord=gene['start']
+            if gene['end'] != None:
+                region_stop_coord=gene['end']+100
+            else:
+                region_stop_coord=gene['end']
+            for rec in sam_file.fetch( contig=gene['sequence'], start=region_start_coord, stop=region_stop_coord ):
 
                 # get the info about the record from the bam file
                 clear_name = rec.query_name
