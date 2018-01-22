@@ -284,7 +284,7 @@ class gene_controller():
             # Add spot and dict [gene] -> count to containers
             self.list_indexes.append(gene_id)
             self.list_row_values.append(transcript_counts_by_spot)
-            self.total_record += sum([transcript_count for spot_coordinate,transcript_count in transcript_counts_by_spot.iteritems() ])
+            self.total_record += sum([1 for spot_coordinate,transcript_count in transcript_counts_by_spot.iteritems() ])
             self.discarded_reads += discarded_reads_worker
 
     def collect_results(self, ):
