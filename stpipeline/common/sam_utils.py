@@ -39,3 +39,64 @@ def convert_to_AlignedSegment(header, sequence, quality,
     aligned_segment.set_tag('RG', '0')
 
     return aligned_segment
+
+
+
+def get_annotations(bam_file_name, return_queue=None, return_filename=False):
+    """
+    Function that extracts the values of the XF tag in a bam file (gene_id from the annotation step)
+    and returns a dictionary with counts for all values present
+    """
+    import subprocess
+    import multiprocessing
+    import sys
+
+    annotations = dict()
+
+    samtools_view = subprocess.Popen(
+        ['samtools','view',bam_file_name],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE)
+
+    grep = subprocess.Popen(
+        ['grep','-E','XF\:Z\:.+(\t|$)','--only-matching'],
+        stdin=samtools_view.stdout,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE)
+
+    unique = subprocess.Popen(
+        ['uniq','-c'],
+        stdin=grep.stdout,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE)
+
+    while True:
+        line = unique.stdout.readline().rstrip().lstrip().split()
+        if line:
+            try:
+                annotations[line[1].split('XF:Z:')[1]] += int(line[0])
+            except KeyError:
+                annotations[line[1].split('XF:Z:')[1]] = int(line[0])
+        else: break
+
+    errmsg = "A {} subprocess generated an error while running the stpipeline.common.sam_utils.get_annotations function.\n{}\n"
+    stdout, stderr = samtools_view.communicate()
+    if len(stderr) > 0:
+        sys.stderr.write(msg.format('samtools view',stderr))
+        sys.exit(1)
+
+    stdout, stderr = grep.communicate()
+    if len(stderr) > 0:
+        sys.stderr.write(msg.format('grep',stderr))
+        sys.exit(1)
+
+    stdout, stderr = unique.communicate()
+    if len(stderr) > 0:
+        sys.stderr.write(msg.format('uniq',stderr))
+        sys.exit(1)
+
+    if return_filename: annotations = (annotations,bam_file_name)
+    if return_queue:
+        return_queue.put(annotations)
+    else:
+        return annotations

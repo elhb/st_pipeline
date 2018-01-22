@@ -841,8 +841,9 @@ class Pipeline():
         # STEP: Create dataset and remove duplicates
         #=================================================================
         self.logger.info("Starting creating dataset {}".format(globaltime.getTimestamp()))
+        from stpipeline.common.createDataset import DatasetCreator
         try:
-            createDataset(FILENAMES["annotated"],
+            test = DatasetCreator(FILENAMES["annotated"],
                           qa_stats, # Passed as reference
                           self.ref_annotation,
                           self.umi_cluster_algorithm,
@@ -851,6 +852,7 @@ class Pipeline():
                           self.output_folder,
                           self.expName,
                           True) # Verbose
+            test.run()
         except Exception:
             raise
 
