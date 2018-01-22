@@ -12,6 +12,7 @@ import logging
 from stpipeline.common.dataset import createDataset
 from stpipeline.common.stats import Stats
 from stpipeline.common.utils import safeRemove
+from stpipeline.common.createDataset import DatasetCreator
 
 def computeSaturation(nreads, 
                       annotated_reads,
@@ -113,7 +114,7 @@ def computeSaturation(nreads,
         stats = Stats()
         input_file = file_names[spoint]
         try:
-            createDataset(input_file,
+            dataset_creator = DatasetCreator(input_file,
                           stats,
                           gff_filename,
                           umi_cluster_algorithm,
@@ -122,6 +123,7 @@ def computeSaturation(nreads,
                           temp_folder,
                           expName,
                           False) # Verbose
+            dataset_creator.run()
         except Exception as e:
             error = "Error computing saturation curve: createDataset execution failed\n"
             logger.error(error)

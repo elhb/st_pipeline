@@ -13,6 +13,7 @@ from stpipeline.common.stats import qa_stats
 from stpipeline.common.dataset import createDataset
 from stpipeline.common.saturation import computeSaturation
 from stpipeline.version import version_number
+from stpipeline.common.createDataset import DatasetCreator
 from taggd.io.barcode_utils import read_barcode_file
 import logging
 import argparse
@@ -841,9 +842,8 @@ class Pipeline():
         # STEP: Create dataset and remove duplicates
         #=================================================================
         self.logger.info("Starting creating dataset {}".format(globaltime.getTimestamp()))
-        from stpipeline.common.createDataset import DatasetCreator
         try:
-            test = DatasetCreator(FILENAMES["annotated"],
+            dataset_creator = DatasetCreator(FILENAMES["annotated"],
                           qa_stats, # Passed as reference
                           self.ref_annotation,
                           self.umi_cluster_algorithm,
@@ -852,7 +852,7 @@ class Pipeline():
                           self.output_folder,
                           self.expName,
                           True) # Verbose
-            test.run()
+            dataset_creator.run()
         except Exception:
             raise
 
