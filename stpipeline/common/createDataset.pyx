@@ -6,6 +6,7 @@ from collections import defaultdict
 import numpy as np
 import pandas as pd
 import pysam
+import time
 from stpipeline.common.clustering import *
 from stpipeline.common.unique_events_parser import uniqueEventsParser
 from stpipeline.common.dataset import computeUniqueUMIs
@@ -288,7 +289,9 @@ class gene_controller():
             print 'empty queue call #',i;
             i +=1
             self.empty_queue()
+            time.sleep(1)
         for worker in self.workers: worker.process.join()
+        time.sleep(10)
         print 'empty queue call #',i,'(final)';
         self.empty_queue()
 
