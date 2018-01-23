@@ -409,16 +409,17 @@ class worker_process():
             # get the genes from the bamfiles
             # pysam.index( filename, '{0}.bai'.format(filename) )
             sam_file = pysam.AlignmentFile(filename, "rb")
+            length_dict = { name:length for name, length in zip(sam_file.references,sam_file.lengths) }
             reads_in_bam = 0
 
             # Parse the coordinate sorted bamfile record by record i.e. by genome
             # coordinate from first chromosome to last
             if gene['start'] != None:
-                region_start_coord=gene['start']-100
+                region_start_coord=max ( 0, gene['start']-100 )
             else:
                 region_start_coord=gene['start']
             if gene['end'] != None:
-                region_stop_coord=gene['end']+100
+                region_stop_coord=min( gene['end']+100, length_dict[gene['sequence']] )
             else:
                 region_stop_coord=gene['end']
             for rec in sam_file.fetch( contig=gene['sequence'], start=region_start_coord, stop=region_stop_coord ):
