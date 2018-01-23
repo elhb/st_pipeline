@@ -257,6 +257,8 @@ class gene_controller():
         for worker in workers:
             worker.genes=[]
             worker.return_queue = self.results_queue
+            self.workers.append(worker)
+        self.worker_pids=[worker.process.pid for worker in self.workers]
 
         no_feature = self.genes['__no_feature']
         del(self.genes['__no_feature'])
