@@ -15,6 +15,27 @@ from stpipeline.common.adaptors import removeAdaptor
 from stpipeline.common.stats import qa_stats
 from itertools import izip
 from sqlitedict import SqliteDict
+import ujson
+
+import fcntl
+import sys
+
+F_SETPIPE_SZ = 1031  # Linux 2.6.35+
+F_GETPIPE_SZ = 1032  # Linux 2.6.35+
+
+def open_fifo(fifo):
+    try:
+        print "Checking fifo file {}...".format(fifo)
+        fifo_fd = open(fifo, "r+")
+        print "Pipe size            : "+str(fcntl.fcntl(fifo_fd, F_GETPIPE_SZ)/1024.0)+'KB'
+        fcntl.fcntl(fifo_fd, F_SETPIPE_SZ, 1024*1024)
+        print "Pipe (modified) size : "+str(fcntl.fcntl(fifo_fd, F_GETPIPE_SZ)/1024)+'KB'
+        return fifo_fd
+    except Exception, e:
+        print "Unable to create fifo, error: "+str(e)
+
+def write_with_n(msg):
+    sys.stderr.write(msg+'\n')
 
 class InputReadsFilter():
     """
@@ -50,7 +71,7 @@ class InputReadsFilter():
     :param adaptor_missmatches: number of miss-matches allowed when removing adaptors
     """
 
-    def __init__(self, verbose=False, max_reads_in_memory=10000000, 
+    def __init__(self, verbose=True, max_reads_in_memory=10000000, 
                  stat_line_interwall=100000, chunk_size=100000):
         """
         Initiates the instance and setting default values
@@ -178,63 +199,66 @@ class InputReadsFilter():
         Function that starts and controlls the subprocesses and finally merges the outputs
         """
 
+        self.verbose =True
         if self.verbose:
-            self.logger.debug('InputReadsFilter::INFO:: main process pid='+str(os.getpid())+'.')
+            write_with_n('InputReadsFilter::INFO:: main process pid='+str(os.getpid())+'.')
 
         # create queues and connections
         if self.verbose:
-            self.logger.debug('InputReadsFilter::INFO:: main process - Creating queues and connections.')
+            write_with_n('InputReadsFilter::INFO:: main process - Creating queues and connections.')
         if self.verbose:
-            self.logger.debug('InputReadsFilter::INFO:: main process - Creating input reads queue.')
-        self.input_read_queue = multiprocessing.Queue(self.max_chunks_in_queue)
+            write_with_n('InputReadsFilter::INFO:: main process - Creating input reads queue.')
+        #self.input_read_queue = multiprocess.Queue(self.max_chunks_in_queue)
         if self.verbose:
-            self.logger.debug('InputReadsFilter::INFO:: main process - Creating output reads queue.')
+            write_with_n('InputReadsFilter::INFO:: main process - Creating output reads queue.')
         self.output_read_queue = multiprocessing.Queue(self.max_chunks_in_queue)
+        #self.output_read_queue = multiprocess.Queue(self.max_chunks_in_queue)
         if self.verbose:
-            self.logger.debug('InputReadsFilter::INFO:: main process - Creating counter pipe.')
+            write_with_n('InputReadsFilter::INFO:: main process - Creating counter pipe.')
         self.counter_connection_send_end, counter_connection_recv_end = multiprocessing.Pipe()
 
         self.reader_running = multiprocessing.Value(ctypes.c_bool, True)
         self.workers_running= multiprocessing.Value(ctypes.c_bool, True)
 
-        # start reader subprocess
-        if self.verbose:
-            self.logger.debug('InputReadsFilter::INFO:: main process - Starting reader.')
-        self.reader = multiprocessing.Process(target=self.input_files_reader)
-        self.reader.start()
-
         # start worker pool
         if self.verbose:
-            self.logger.debug('InputReadsFilter::INFO:: main process - Starting pool.')
+            write_with_n('InputReadsFilter::INFO:: main process - Starting pool.')
         self.worker_pool = [ multiprocessing.Process(target=self.parallel_worker_function)
                             for i in range(self.threads-1) ]
         for process in self.worker_pool: process.start()
         worker_process_ids = [process.pid for process in self.worker_pool]
+        self.worker_process_ids = worker_process_ids
+
+        # start reader subprocess
+        if self.verbose:
+            write_with_n('InputReadsFilter::INFO:: main process - Starting reader.')
+        self.reader = multiprocessing.Process(target=self.input_files_reader)
+        self.reader.start()
 
         # start writer subprocess
         if self.verbose:
-            self.logger.debug('InputReadsFilter::INFO:: main process - Creating writer.')
+            write_with_n('InputReadsFilter::INFO:: main process - Creating writer.')
         self.writer = multiprocessing.Process(target=self.output_files_writer)
         if self.verbose:
-            self.logger.debug('InputReadsFilter::INFO:: main process - Stariting writer.')
+            write_with_n('InputReadsFilter::INFO:: main process - Stariting writer.')
         self.writer.start()
         if self.verbose:
-            self.logger.debug('InputReadsFilter::INFO:: main process - writer started.')
+            write_with_n('InputReadsFilter::INFO:: main process - writer started.')
 
         # wait for reader to complete
         if self.verbose:
-            self.logger.debug('InputReadsFilter::INFO:: main process - waiting for reader.')
+            write_with_n('InputReadsFilter::INFO:: main process - waiting for reader.')
         self.reader.join()
 
         # wait for worker pool to complete
         if self.verbose:
-            self.logger.debug('InputReadsFilter::INFO:: main process - waiting for pool.')
+            write_with_n('InputReadsFilter::INFO:: main process - waiting for pool.')
         for process in self.worker_pool: process.join()
         self.workers_running.value = False
 
         # merge bam files
         if self.verbose:
-            self.logger.debug('InputReadsFilter::INFO:: main process - merging bam files produced by workers.')
+            write_with_n('InputReadsFilter::INFO:: main process - merging bam files produced by workers.')
         worker_bams = [ self.out_rv.rstrip('.bam')+'.WORKER_{}.bam'.format(process_id)
                         for process_id in worker_process_ids ]
         command = 'samtools merge -@ {} {} {}'.format(
@@ -244,23 +268,23 @@ class InputReadsFilter():
             )
         subprocess.check_call(command, shell=True)
         if self.verbose:
-            self.logger.debug('InputReadsFilter::INFO:: main process - removing bam files produced by workers.')
+            write_with_n('InputReadsFilter::INFO:: main process - removing bam files produced by workers.')
         for bam in worker_bams: os.remove(bam)
 
         # wait for writer to complete
         if self.verbose:
-            self.logger.debug('InputReadsFilter::INFO:: main process - waiting for writer.')
+            write_with_n('InputReadsFilter::INFO:: main process - waiting for writer.')
         self.writer.join()
 
         # get the counters from the writer process
         if self.verbose:
-            self.logger.debug('InputReadsFilter::INFO:: main process - fetching counter.')
+            write_with_n('InputReadsFilter::INFO:: main process - fetching counter.')
         read_pair_counters = counter_connection_recv_end.recv()
         counter_connection_recv_end.close()
         self.counter_connection_send_end.close()
 
         if self.verbose:
-            self.logger.debug(
+            write_with_n(
                 'InputReadsFilter::INFO:: main process - updating logs and checking for prescence of files.'
                 )
         # Write info to the log
@@ -305,7 +329,7 @@ class InputReadsFilter():
         qa_stats.reads_after_trimming_forward = (read_pair_counters['total_reads'] - read_pair_counters['dropped_rv'])
         qa_stats.reads_after_trimming_reverse = (read_pair_counters['total_reads'] - read_pair_counters['dropped_rv'])
         if self.verbose:
-            self.logger.debug('InputReadsFilter::INFO:: main process - completed.')
+            write_with_n('InputReadsFilter::INFO:: main process - completed.')
 
     def input_files_reader(self, ):
         """
@@ -320,31 +344,61 @@ class InputReadsFilter():
         cdef str identity = 'READER'
 
         if self.verbose:
-            self.logger.debug('InputReadsFilter::INFO:: Starting input files reader pid={}.'.format(os.getpid()))
+            write_with_n('InputReadsFilter::INFO:: Starting input files reader pid={}.'.format(os.getpid()))
+
+        # make fifos for passing info to subprocess in a more efficint way
+        cdef int pid
+        r1fifo_names = []
+        r2fifo_names = []
+        for pid in self.worker_process_ids:
+            os.mkfifo('_tmpDistFifo.r1.worker_{}'.format(pid))
+            os.mkfifo('_tmpDistFifo.r2.worker_{}'.format(pid))
+            r1fifo_names.append( '_tmpDistFifo.r1.worker_{}'.format(pid) )
+            r2fifo_names.append( '_tmpDistFifo.r2.worker_{}'.format(pid) )
+        #r1fifos = [open(fifo_name,'w') for fifo_name in r1fifo_names]
+        #r2fifos = [open(fifo_name,'w') for fifo_name in r2fifo_names]
+        r1fifos = [open_fifo(fifo_name) for fifo_name in r1fifo_names]
+        r2fifos = [open_fifo(fifo_name) for fifo_name in r2fifo_names]
 
         # Open fastq files with the fastq parser
-        fw_file = safeOpenFile(self.fw, "rU")
-        rv_file = safeOpenFile(self.rv, "rU")
+        if is_fifo(self.fw):
+            fw_file = open_fifo(self.fw)
+            fw_file.close()
+            fw_file = safeOpenFile(self.fw, "rU")
+        else:
+            fw_file = safeOpenFile(self.fw, "rU")
+        if is_fifo(self.rv):
+            rv_file = open_fifo(self.rv)
+            rv_file.close()
+            rv_file = safeOpenFile(self.rv, "rU")
+        else:
+            rv_file = safeOpenFile(self.rv, "rU")
 
         if self.verbose:
-            self.logger.debug('InputReadsFilter::INFO:: input files reader - starting to parse reads.')
+            write_with_n('InputReadsFilter::INFO:: input files reader - starting to parse reads.')
         if self.verbose:
             self.print_stat_line(start_time, last_time, count, last_count, identity, header=True)
-        cdef list chunk = []
-        cdef tuple read_one
-        cdef tuple read_two
-        for read_one, read_two in izip(readfq(fw_file), readfq(rv_file)):
-            chunk.append((read_one, read_two))
-            if len(chunk) == self.chunk_size:
-                self.input_read_queue.put( chunk )
-                chunk = []
-            count += 1
-            if self.verbose and count % self.stat_line_interwall == 0:
-                self.print_stat_line(start_time, last_time, count, last_count, identity)
-                last_time = time.time()
-                last_count = count
+        #cdef list chunk = []
+        cdef str read_one
+        cdef str read_two
+        cdef int to4counter = 0
+        cdef int fifosIndex = 0
+        for read_one, read_two in izip(fw_file, rv_file):
+            r1fifos[fifosIndex].write(read_one)
+            r2fifos[fifosIndex].write(read_two)
+            to4counter += 1
+            if to4counter == 4:
+                count += 1
+                to4counter = 0
+                fifosIndex += 1
+                if fifosIndex == len(r1fifos): fifosIndex = 0
+                if self.verbose and count % self.stat_line_interwall == 0:
+                    self.print_stat_line(start_time, last_time, count, last_count, identity)
+                    last_time = time.time()
+                    last_count = count
 
-        self.input_read_queue.put(chunk)
+        # close fifos
+        for fifo in r1fifos+r2fifos: fifo.close()
 
         if self.verbose:
             self.print_stat_line(start_time, last_time, count, last_count, identity)
@@ -352,20 +406,20 @@ class InputReadsFilter():
             last_count = count
 
         if self.verbose:
-            self.logger.debug('InputReadsFilter::INFO:: input files reader - all reads parsed.')
+            write_with_n('InputReadsFilter::INFO:: input files reader - all reads parsed.')
         fw_file.close()
         rv_file.close()
 
+        #if self.verbose:
+        #    write_with_n('InputReadsFilter::INFO:: input files reader - closing and joining queue.')
+        #self.input_read_queue.close()
+        #self.input_read_queue.join_thread()
         if self.verbose:
-            self.logger.debug('InputReadsFilter::INFO:: input files reader - closing and joining queue.')
-        self.input_read_queue.close()
-        self.input_read_queue.join_thread()
-        if self.verbose:
-            self.logger.debug('InputReadsFilter::INFO:: input files reader - shutting down.')
+            write_with_n('InputReadsFilter::INFO:: input files reader - shutting down.')
         self.reader_running.value = False
 
         if self.verbose:
-            self.logger.debug('InputReadsFilter::INFO:: input files reader - completed.')
+            write_with_n('InputReadsFilter::INFO:: input files reader - completed.')
 
     def output_files_writer(self, ):
         """
@@ -381,7 +435,7 @@ class InputReadsFilter():
         cdef str identity = 'WRITER'
 
         if self.verbose:
-            self.logger.debug('InputReadsFilter::INFO:: Starting output files writer pid={}.'.format(os.getpid()))
+            write_with_n('InputReadsFilter::INFO:: Starting output files writer pid={}.'.format(os.getpid()))
 
         # Create output file writers
         if self.keep_discarded_files:
@@ -403,12 +457,16 @@ class InputReadsFilter():
         cdef dict read_pair
 
         if self.verbose:
-            self.logger.debug('InputReadsFilter::INFO:: output files writer - starting to parse reads from queue.')
+            write_with_n('InputReadsFilter::INFO:: output files writer - starting to parse reads from queue.')
+        loop_time = time.time()
         while self.workers_running.value or not self.output_read_queue.empty():
 
             while not self.output_read_queue.empty():
 
-                chunk = self.output_read_queue.get()
+                try: chunk = ujson.loads(self.output_read_queue.get(timeout=10))
+                except Queue.Empty:
+                    write_with_n('InputReadsFilter::WARNING:: output files writer - Queue is empty')
+                    continue
                 for (discard_reason, header_rv, orig_sequence_rv, orig_quality_rv) in chunk:
 
                     read_pair_counters['total_reads'] += 1
@@ -426,7 +484,11 @@ class InputReadsFilter():
                         self.print_stat_line(start_time, last_time, count, last_count, identity)
                         last_time = time.time()
                         last_count = count
-            #if self.verbose: self.logger.debug('InputReadsFilter::INFO:: output files writer - queue empty.')
+                    loop_time = time.time()
+            if time.time() - loop_time > 600:
+                write_with_n('InputReadsFilter::WARNING:: output files writer - >10 mins since last data delivery and workers_running={}, stopping anyways, make sure the read counts add upp!'.format(self.workers_running.value))
+                break
+            #if self.verbose: write_with_n('InputReadsFilter::INFO:: output files writer - queue empty.')
 
         if self.verbose:
             self.print_stat_line(start_time, last_time, count, last_count, identity)
@@ -434,21 +496,21 @@ class InputReadsFilter():
             last_count = count
 
         if self.verbose:
-            self.logger.debug('InputReadsFilter::INFO:: output files writer - all reads parsed.')
+            write_with_n('InputReadsFilter::INFO:: output files writer - all reads parsed.')
 
         if self.verbose:
-            self.logger.debug('InputReadsFilter::INFO:: output files writer - sending counter to parent process.')
+            write_with_n('InputReadsFilter::INFO:: output files writer - sending counter to parent process.')
         self.counter_connection_send_end.send(read_pair_counters)
 
         if self.verbose:
-            self.logger.debug('InputReadsFilter::INFO:: output files writer - closing outfiles.')
+            write_with_n('InputReadsFilter::INFO:: output files writer - closing outfiles.')
         if self.keep_discarded_files:
             out_rv_handle_discarded.flush()
             out_rv_handle_discarded.close()
             out_rv_writer_discarded.close()
 
         if self.verbose:
-            self.logger.debug('InputReadsFilter::INFO:: output files writer - completed.')
+            write_with_n('InputReadsFilter::INFO:: output files writer - completed.')
 
     def parallel_worker_function(self, ):
         """
@@ -464,10 +526,10 @@ class InputReadsFilter():
         identity = 'WORKER_' + str(os.getpid())
 
         if self.verbose:
-            self.logger.debug('InputReadsFilter::INFO:: Starting parallel worker process pid={}.'.format(os.getpid()))
+            write_with_n('InputReadsFilter::INFO:: Starting parallel worker process pid={}.'.format(os.getpid()))
 
         if self.verbose:
-            self.logger.debug(
+            write_with_n(
             'InputReadsFilter::INFO:: parallel worker process pid={} - starting to parse reads.'.format(os.getpid())
             )
         
@@ -477,15 +539,20 @@ class InputReadsFilter():
             }
         bam_file = pysam.AlignmentFile(self.out_rv.rstrip('.bam') + '.{}.bam'.format(identity), "wbu", header=bam_header)
 
-        while self.reader_running.value or not self.input_read_queue.empty():
+        time.sleep(1)
+        infifo_r1 = open('_tmpDistFifo.r1.worker_{}'.format(os.getpid()),'r')
+        infifo_r2 = open('_tmpDistFifo.r2.worker_{}'.format(os.getpid()),'r')
 
-            while not self.input_read_queue.empty():
+        while self.reader_running.value:
 
-                try:
-                    in_chunk = self.input_read_queue.get(timeout=10)
-                except Queue.Empty: continue
+        # for read_one, read_two in izip(readfq(fw_file), readfq(rv_file)):
+        #     chunk.append([read_one, read_two])
+        #     if len(chunk) == self.chunk_size:
+        #         self.input_read_queue.put( ujson.dumps(chunk) )
+        #         chunk = []
+
                 out_chunk = []
-                for (header_fw, sequence_fw, quality_fw), (header_rv, sequence_rv, quality_rv) in in_chunk:
+                for (header_fw, sequence_fw, quality_fw), (header_rv, sequence_rv, quality_rv) in izip(readfq(infifo_r1), readfq(infifo_r2)):
 
                     discard_reason = None
                     orig_sequence_rv, orig_quality_rv = sequence_rv, quality_rv
@@ -573,8 +640,9 @@ class InputReadsFilter():
                                 umi_seq
                                 )
                             )
-                        out_chunk.append((discard_reason, None, None, None))
+                        out_chunk.append((discard_reason, '', '', ''))
                     else:
+                        #out_chunk.append((discard_reason, '', '', ''))
                         out_chunk.append((discard_reason, header_rv, orig_sequence_rv, orig_quality_rv))
 
                     count += 1
@@ -582,16 +650,27 @@ class InputReadsFilter():
                         self.print_stat_line(start_time, last_time, count, last_count, identity)
                         last_time = time.time()
                         last_count = count
+                    
+                    if len(out_chunk) == self.chunk_size:
+                        self.output_read_queue.put( ujson.dumps(out_chunk) )
+                        out_chunk = []
 
-                self.output_read_queue.put( out_chunk )
+        if len(out_chunk):
+            self.output_read_queue.put( ujson.dumps(out_chunk) )
+            out_chunk = []
 
+        infifo_r1.close()
+        infifo_r2.close()
+        os.remove(infifo_r1.name)
+        os.remove(infifo_r2.name)
+        
         if self.verbose:
             self.print_stat_line(start_time, last_time, count, last_count, identity)
             last_time = time.time()
             last_count = count
         bam_file.close()
         if self.verbose:
-            self.logger.debug(
+            write_with_n(
                 'InputReadsFilter::INFO:: parallel worker process pid={} - completed.'.format(os.getpid())
                 )
 
@@ -601,9 +680,9 @@ class InputReadsFilter():
         """
 
         if header:
-            self.logger.debug('PROCESS\tREADSPROCESSED\tTIME (s)\tAV_SPEED (reads/s)\tCU_SPEED (reads/s)')
+            write_with_n('PROCESS\tREADSPROCESSED\tTIME (s)\tAV_SPEED (reads/s)\tCU_SPEED (reads/s)')
 
-        self.logger.debug(
+        write_with_n(
                 str(identity)+'\t'+\
                 str(count)+'\t'+\
                 str(round(time.time()-start_time,3))+'\t'+\
