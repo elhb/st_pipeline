@@ -13,21 +13,22 @@ from stpipeline.common.clustering import *
 from stpipeline.common.unique_events_parser import uniqueEventsParser
 import logging
 import sys
+import blist
 
 def computeUniqueUMIs(transcripts, umi_counting_offset, umi_allowed_mismatches, group_umi_func):
     """ Helper function to compute unique transcripts UMIs from
     a given list of transcripts
     """
     # Sort transcripts by strand and start position
-    sorted_transcripts = sorted(transcripts, key = lambda x: (x[5], x[1]))
+    sorted_transcripts = transcripts #sorted(transcripts, key = lambda x: (x[5], x[1])) # transcripts already sorted thanks to blist.sortedlist
     # Group transcripts by strand and start-position allowing an offset
     # And then performs the UMI clustering in each group to finally
     # compute the gene count as the sum of the unique UMIs for each group (strand,start,offset)
-    grouped_transcripts = defaultdict(list)
+    grouped_transcripts = defaultdict(blist.blist)
     # TODO A probably better approach is to get the mean of all the start positions
     # and then make mean +- 300bp (user defined) a group to account for the library
     # size variability and then group the rest of transcripts normally by (strand, start, position).
-    unique_transcripts = list()
+    unique_transcripts = blist.blist()
     num_transcripts = len(transcripts)
     for i in xrange(num_transcripts - 1):
         current = sorted_transcripts[i]
@@ -125,10 +126,11 @@ def createDataset(input_file,
     list_indexes = list()   
 
     # Parse unique events to generate the unique counts and the BED file    
-    unique_events_parser = uniqueEventsParser(input_file, gff_filename)
+    unique_events_parser = uniqueEventsParser(input_file, gff_filename, verbose=True)
     with open(os.path.join(output_folder, filenameReadsBED), "w") as reads_handler:
         # this is the generator returning a dictionary with spots for each gene
-        for gene, spots in unique_events_parser.all_unique_events(): 
+        for gene, spots in unique_events_parser.all_unique_events():
+            sys.stdout.write('.')
             transcript_counts_by_spot = {}
             for spot_coordinates, reads in spots.iteritems():
                 (x,y) = spot_coordinates
@@ -137,6 +139,11 @@ def createDataset(input_file,
                 # First:
                 # Get the original number of transcripts (reads)
                 read_count = len(reads)
+                if read_count >= 4**len(reads[0][6]): sys.stderr.write(
+                        'WARNING:: UMIs saturated.\n' + \
+                        '          The number of reads for gene {} at spot {} are greater than the number of possible {}base combinations.\n'.format(gene,spot_coordinates,len(reads[0][6])) + \
+                        '          ({}>={}) THE QUANTIFICATION FOR THIS GENE IS NOT RELIABLE.\n'.format(read_count,4**len(reads[0][6]))
+                    )
                 if not diable_umi:
                     # Compute unique transcripts (based on UMI, strand and start position +- threshold)
                     unique_transcripts = computeUniqueUMIs(reads, umi_counting_offset, 

@@ -6,6 +6,7 @@ import pysam
 import subprocess
 import multiprocessing
 import sys
+import json
 
 def convert_to_AlignedSegment(header, sequence, quality,
                               barcode_sequence, umi_sequence):
@@ -121,6 +122,7 @@ def merge_bam(merged_file_name, files_to_merge, ubam=False, samtools=True):
                 except KeyError:
                     annotations[annotation] = 1
 
+    with open('{}.annotations.json'.format(merged_file_name),'w') as annotations_json: json.dump(annotations,annotations_json)
     return sum(annotations.values())
 
 def get_annotations(bam_file_name, return_queue=None):

@@ -12,6 +12,8 @@ import logging
 from stpipeline.common.dataset import createDataset
 from stpipeline.common.stats import Stats
 from stpipeline.common.utils import safeRemove
+from stpipeline.common.sam_utils import get_annotations
+import json
 
 def computeSaturation(nreads, 
                       annotated_reads,
@@ -115,6 +117,10 @@ def computeSaturation(nreads,
     for spoint in saturation_points:
         stats = Stats()
         input_file = file_names[spoint]
+        annot = get_annotations(input_file)
+        annot_file=open('{}.annotations.json'.format(input_file),'w')
+        json.dump(annot,annot_file)
+        annot_file.close()
         try:
             createDataset(input_file,
                           stats,
@@ -125,7 +131,7 @@ def computeSaturation(nreads,
                           diable_umi,
                           temp_folder,
                           expName,
-                          False) # Verbose
+                          True) # Verbose
         except Exception as e:
             error = "Error computing saturation curve: createDataset execution failed\n"
             logger.error(error)
