@@ -63,7 +63,7 @@ def merge_bam(merged_file_name, files_to_merge, ubam=False, samtools=True):
 
         # Start to merge the files
         threads=len(files_to_merge)
-        arguments = ['samtools','merge','-@',str(threads), merged_file_name]
+        arguments = ['samtools','merge','-c','-p','-@',str(threads), merged_file_name]
         for filename in files_to_merge: arguments.append(filename)
         samtools_merge = subprocess.Popen(
             arguments,
