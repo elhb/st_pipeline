@@ -42,7 +42,7 @@ def main(counts_matrix, coordinates_file, update_coordinates, outfile, outformat
     with open(coordinates_file, "r") as filehandler:
         for line in filehandler.readlines():
             tokens = line.split()
-            assert(len(tokens) == 6 or len(tokens) == 4)
+            assert(len(tokens) == 6 or len(tokens) == 4 or len(tokens) == 7)
             if tokens[0] != "x":
                 old_x = int(tokens[0])
                 old_y = int(tokens[1])
