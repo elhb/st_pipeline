@@ -21,7 +21,7 @@ import os
 import pandas as pd
 from stpipeline.common.gff_reader import *
               
-def main(counts_matrix, gene_types_keep, outfile, annotation, ensembl_ids):
+def main(counts_matrix, gene_types_keep, outfile, annotation, ensembl_ids, gene_type_attribute):
 
     if not os.path.isfile(counts_matrix) or not os.path.isfile(annotation):
         sys.stderr.write("Error, input file not present or invalid format\n")
@@ -33,7 +33,11 @@ def main(counts_matrix, gene_types_keep, outfile, annotation, ensembl_ids):
     gene_types = dict()
     for line in gff_lines(annotation):
         gene_name = line["gene_id"] if ensembl_ids else line["gene_name"]
-        gene_types[gene_name] = line["gene_type"]
+        try:
+            gene_types[gene_name] = line[gene_type_attribute]
+        except KeyError:
+            sys.stderr.write("Error, the gene_type_attribute={} is not present for gene {}\n".format(gene_type_attribute,gene_name))
+            sys.exit(1)
     assert(len(gene_types) > 0)
 
     # Read the data frame (genes as columns)
@@ -62,9 +66,11 @@ if __name__ == '__main__':
     parser.add_argument("--outfile", help="Name of the output file")
     parser.add_argument("--gene-types-keep", required=True, nargs='+', type=str,
                         help="List of Ensembl gene types to keep (E.x protein_coding lincRNA")
+    parser.add_argument("--gene-type-attribute", required=False, default="gene_type", type=str,
+                        help='Name of the gene type attribute as specified in the Ensembl annotation file (default is "gene_type", "gene_biotype" is also a common value).')
     parser.add_argument("--annotation", help="The Ensembl annotation file", required=True, type=str)
     parser.add_argument("--ensembl-ids", action="store_true", 
                         default=False, help="Pass this parameter if the genes in the matrix" \
                         "are named with Ensembl Ids instead of gene names")
     args = parser.parse_args()
-    main(args.counts_matrix, args.gene_types_keep, args.outfile, args.annotation, args.ensembl_ids)
+    main(args.counts_matrix, args.gene_types_keep, args.outfile, args.annotation, args.ensembl_ids, args.gene_type_attribute)
